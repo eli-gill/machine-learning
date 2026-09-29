@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Mining Studio</title>
+  <meta name="description" content="A visual, drag-and-drop data mining workbench for students, inspired by SPSS Modeler. Runs entirely in the browser.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand"><span class="logo">◈</span> Data Mining Studio</div>
+    <div class="tools">
+      <button id="btn-new" title="Start an empty stream">New</button>
+      <button id="btn-open" title="Open a stream saved as .json">Open…</button>
+      <button id="btn-save" title="Download this stream as a .json file">Save</button>
+      <select id="sel-example" title="Load a ready-made example stream"><option value="">Examples…</option></select>
+      <span class="sep"></span>
+      <button id="btn-run" class="primary" title="Run every branch of the stream (F5)">▶ Run</button>
+      <button id="btn-help">? Help</button>
+    </div>
+    <input type="file" id="file-open" accept=".json,application/json" hidden>
+  </header>
+
+  <main>
+    <section id="canvas-wrap">
+      <div id="stage">
+        <svg id="links" width="3000" height="2000"></svg>
+      </div>
+      <div id="empty-hint" class="hidden">
+        <p><b>The canvas is empty.</b></p>
+        <p>Click <b>Sample Data</b> in the palette below to add a data source,<br>or choose one of the <b>Examples…</b> in the toolbar.</p>
+      </div>
+    </section>
+    <aside id="manager">
+      <div class="tabs">
+        <button data-tab="outputs" class="active">Outputs<span id="tab-outputs-count"></span></button>
+        <button data-tab="models">Models<span id="tab-models-count"></span></button>
+      </div>
+      <div id="mgr-outputs" class="mgr-list"></div>
+      <div id="mgr-models" class="mgr-list hidden"></div>
+    </aside>
+  </main>
+
+  <footer id="palette">
+    <div class="tabs" id="palette-tabs"></div>
+    <div id="palette-items"></div>
+  </footer>
+  <div id="status-bar">Ready.</div>
+  <div id="ctx" class="hidden"></div>
+
+  <template id="help-template">
+    <div class="help-doc">
+      <p>You build a <b>stream</b>: a chain of nodes that data flows through, left to right, just like in SPSS Modeler.
+        Everything runs in your browser. No data is uploaded anywhere.</p>
+      <h3>Building a stream</h3>
+      <ul>
+        <li><b>Add nodes</b>: click an item in the palette at the bottom, or drag it onto the canvas. If a node is selected, the new node is added after it and connected automatically, so you can click through a whole chain.</li>
+        <li><b>Connect</b>: drag from the small dot on the right of a node onto another node. Click a connection and press <kbd>Delete</kbd> to remove it.</li>
+        <li><b>Edit</b>: double-click a node (or select it and press <kbd>Enter</kbd>). Right-click for Preview, Run, Duplicate, Disconnect and Delete.</li>
+        <li><b>Run</b>: <kbd>▶ Run</kbd> (or <kbd>F5</kbd>) runs every branch. Results appear in the <b>Outputs</b> panel and trained models in <b>Models</b>. Nodes with a red outline have an error; hover over them to read it.</li>
+        <li>Your stream is auto-saved in this browser. Use <b>Save</b> to download it as a file (e.g. to hand in), and <b>Open…</b> to load it again.</li>
+      </ul>
+      <h3>The palette</h3>
+      <dl>
+        <dt class="cat-sources">Sources</dt><dd>Sample Data (built-in practice data) and CSV File (your own data).</dd>
+        <dt class="cat-record">Record Ops</dt><dd>Work on rows: Select (filter rows), Sample, Sort, Distinct (remove duplicates), <b>Merge</b> (join two sources on a key), Append (stack sources), Aggregate (group &amp; summarise).</dd>
+        <dt class="cat-field">Field Ops</dt><dd>Work on columns: Filter (drop/rename fields), Type (number vs text), Fill Missing, Clean Text, Derive (formula), Binning, and <b>Partition</b> (split into Training / Testing).</dd>
+        <dt class="cat-graphs">Graphs</dt><dd>Distribution (bar chart / histogram) and Plot (scatter plot).</dd>
+        <dt class="cat-modeling">Modeling</dt><dd>Decision Tree, Logistic Regression, Linear Regression, KNN, Naive Bayes and K-Means. Pick a <b>target</b> field; the model trains on the Training partition and adds prediction fields (starting with <code>$</code>) to every record.</dd>
+        <dt class="cat-output">Output</dt><dd>Table, Data Audit (quality report), <b>Analysis</b> (accuracy / error on Training vs Testing) and Export CSV.</dd>
+      </dl>
+      <h3>A typical workflow</h3>
+      <ol>
+        <li>Source → Data Audit, to find missing values and messy text.</li>
+        <li>Merge other sources, then clean with Distinct, Clean Text, Fill Missing, Type…</li>
+        <li>Partition (e.g. 70% training).</li>
+        <li>Modeling node with a target.</li>
+        <li>Analysis, to compare Training vs Testing performance.</li>
+      </ol>
+      <p class="muted">Load <b>Examples… → Customer churn</b> to see all of these steps in one stream.</p>
+    </div>
+  </template>
+
+  <script src="js/util.js"></script>
+  <script src="js/datasets.js"></script>
+  <script src="js/models.js"></script>
+  <script src="js/nodes.js"></script>
+  <script src="js/examples.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
