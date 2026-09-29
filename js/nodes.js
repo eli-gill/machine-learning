@@ -575,6 +575,61 @@
     }
   };
 
+  const TRUE_FLAG = /^(t|true|y|yes|1)$/i;
+  T.apriori = {
+    cat: 'modeling', label: 'Apriori', glyph: '⇶', inputs: 1, model: true,
+    desc: 'Association rules (market basket analysis): finds items that tend to occur together, e.g. "if Bread then Butter".',
+    params: [
+      { key: 'format', label: 'Data format', type: 'select', default: 'transactional', options: [
+        { v: 'transactional', l: 'Transactional: one row per item (an ID field + an item field)' },
+        { v: 'tabular', l: 'Tabular: one row per transaction (one field per item or attribute)' }] },
+      { key: 'idField', label: 'Transaction ID field', type: 'field', showIf: p => p.format !== 'tabular' },
+      { key: 'itemField', label: 'Item field', type: 'field', showIf: p => p.format !== 'tabular' },
+      { key: 'inputs', label: 'Fields to use (none checked = all except IDs, Partition and $ fields)', type: 'fields', showIf: p => p.format === 'tabular' },
+      { key: 'items', label: 'Items are', type: 'select', default: 'flags', showIf: p => p.format === 'tabular', options: [
+        { v: 'flags', l: 'Flag fields: the field name is an item when its value is T / True / Yes / Y / 1' },
+        { v: 'values', l: 'Field = value pairs (e.g. Plan = Basic), for categorical data' }] },
+      { key: 'minSupport', label: 'Minimum support % (share of transactions containing the itemset)', type: 'number', default: 10 },
+      { key: 'minConfidence', label: 'Minimum confidence %', type: 'number', default: 50 },
+      { key: 'maxAntecedents', label: 'Maximum items in the antecedent (if… part)', type: 'number', default: 3 },
+      { key: 'sortBy', label: 'Sort rules by', type: 'select', default: 'conf', options: [{ v: 'conf', l: 'Confidence' }, { v: 'lift', l: 'Lift' }, { v: 'support', l: 'Rule support' }] },
+      { key: 'maxRules', label: 'Maximum rules to show', type: 'number', default: 100 }
+    ],
+    exec(inp, p, ctx) {
+      const t = inp[0];
+      let tx;
+      if (p.format === 'tabular') {
+        const names = resolveInputs(t, p, null);
+        if (!names.length) throw new Error('No fields to use as items.');
+        tx = t.rows.map(r => {
+          const items = [];
+          names.forEach(n => {
+            const v = r[n];
+            if (U.isMissing(v)) return;
+            if (p.items === 'values') items.push(n + ' = ' + v);
+            else if (TRUE_FLAG.test(String(v).trim())) items.push(n);
+          });
+          return items;
+        });
+      } else {
+        U.requireField(t, p.idField, 'the transaction ID field'); U.requireField(t, p.itemField, 'the item field');
+        const groups = new Map();
+        t.rows.forEach(r => {
+          const id = r[p.idField], it = r[p.itemField];
+          if (U.isMissing(id) || U.isMissing(it)) return;
+          const k = String(id);
+          if (!groups.has(k)) groups.set(k, new Set());
+          groups.get(k).add(String(it).trim());
+        });
+        tx = [...groups.values()].map(s => [...s]);
+      }
+      const m = DM.models.apriori(tx, p);
+      const head = '<p class="model-head"><b>Apriori</b> on ' + tx.length + ' transactions (' + (p.format === 'tabular' ? 'tabular' : 'transactional') + ' data). ' +
+        'Min support ' + (+p.minSupport) + '%, min confidence ' + (+p.minConfidence) + '%, up to ' + (+p.maxAntecedents) + ' antecedent item(s).</p>';
+      return { data: t, model: { title: (ctx.name || 'Apriori') + ': ' + m.rules.length + ' rules', html: head + m.summary() } };
+    }
+  };
+
   /* ---------- Output ---------- */
   T.table = {
     cat: 'output', label: 'Table', glyph: '▤', inputs: 1, terminal: true,

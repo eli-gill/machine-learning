@@ -378,5 +378,81 @@
     };
   };
 
+  /* ---------- Apriori (association rules) ----------
+     transactions: arrays of item names. Finds itemsets that appear in at least
+     minSupport of transactions, growing them one item at a time, then turns each
+     itemset into rules "antecedent -> one consequent". */
+  M.apriori = function (transactions, p) {
+    const N = transactions.length;
+    if (!N) throw new Error('No transactions to analyse.');
+    const minSup = Math.max(0.0001, (+p.minSupport || 10) / 100), minConf = (+p.minConfidence || 0) / 100;
+    const maxLen = Math.max(1, Math.round(+p.maxAntecedents || 3)) + 1;
+    const minCount = Math.ceil(minSup * N);
+    const tsets = transactions.map(t => new Set(t));
+    const key = items => items.join('\u0001');
+    const support = new Map();   // itemset key -> count
+
+    // Level 1: single items.
+    const c1 = new Map();
+    tsets.forEach(t => t.forEach(it => c1.set(it, (c1.get(it) || 0) + 1)));
+    let level = [...c1.entries()].filter(e => e[1] >= minCount).map(e => [e[0]]).sort();
+    level.forEach(s => support.set(key(s), c1.get(s[0])));
+    const levels = [level.length];
+    let candidatesChecked = c1.size;
+
+    for (let k = 2; k <= maxLen && level.length > 1; k++) {
+      // Join step: combine itemsets that share their first k-2 items.
+      const prev = new Set(level.map(key)), cands = [];
+      for (let i = 0; i < level.length; i++) {
+        for (let j = i + 1; j < level.length; j++) {
+          const a = level[i], b = level[j];
+          if (key(a.slice(0, -1)) !== key(b.slice(0, -1))) break;   // level is sorted, so no later match
+          const c = a.concat(b[b.length - 1]);
+          // Prune step: every (k-1)-subset must itself be frequent.
+          if (c.every((_, d) => prev.has(key(c.filter((__, e) => e !== d))))) cands.push(c);
+        }
+      }
+      if (cands.length > 200000) throw new Error('Too many candidate itemsets. Raise the minimum support.');
+      candidatesChecked += cands.length;
+      const counts = cands.map(c => { let n = 0; tsets.forEach(t => { if (c.every(it => t.has(it))) n++; }); return n; });
+      level = cands.filter((c, i) => counts[i] >= minCount);
+      cands.forEach((c, i) => { if (counts[i] >= minCount) support.set(key(c), counts[i]); });
+      levels.push(level.length);
+    }
+
+    // Rules with a single consequent (like SPSS Modeler's Apriori).
+    const rules = [];
+    support.forEach((cnt, k) => {
+      const items = k.split('\u0001');
+      if (items.length < 2) return;
+      items.forEach(cons => {
+        const ante = items.filter(x => x !== cons);
+        const conf = cnt / support.get(key(ante));
+        if (conf < minConf) return;
+        rules.push({ ante, cons, count: cnt, anteSup: support.get(key(ante)) / N, support: cnt / N, conf, lift: conf / (support.get(cons) / N) });
+      });
+    });
+    const by = p.sortBy === 'lift' ? 'lift' : p.sortBy === 'support' ? 'support' : 'conf';
+    rules.sort((a, b) => b[by] - a[by] || b.conf - a.conf || b.support - a.support);
+
+    return {
+      rules,
+      summary() {
+        const show = rules.slice(0, Math.max(1, +p.maxRules || 100));
+        let h = '<p>' + N + ' transactions. Frequent itemsets (support ≥ ' + U.pct(minSup) + ', i.e. ≥ ' + minCount + ' transactions): ' +
+          levels.map((n, i) => '<b>' + n + '</b> of size ' + (i + 1)).join(', ') + '. ' + candidatesChecked + ' candidate itemsets checked.</p>';
+        if (!rules.length) return h + '<p class="warn">No rules found. Try lowering the minimum support or confidence.</p>';
+        h += '<h3>Rules' + (show.length < rules.length ? ' (top ' + show.length + ' of ' + rules.length + ')' : ' (' + rules.length + ')') + '</h3>';
+        h += '<p class="muted">Read each rule as <i>“if a basket has the antecedent, it also has the consequent”</i>. ' +
+          '<b>Support</b> = share of all transactions containing every item in the rule. <b>Confidence</b> = how often the rule is right when the antecedent is present. ' +
+          '<b>Lift</b> &gt; 1 means the items occur together more often than chance.</p>';
+        h += U.simpleTable(['Antecedent (if…)', 'Consequent (then…)', 'Antecedent support', 'Rule support', 'Confidence', 'Lift', 'Transactions'],
+          show.map(r => [{ html: r.ante.map(U.esc).join(' <span class="muted">&amp;</span> ') }, { html: '<b>' + U.esc(r.cons) + '</b>' },
+            U.pct(r.anteSup), U.pct(r.support), U.pct(r.conf), { html: '<span class="' + (r.lift >= 1.2 ? 'good' : r.lift < 1 ? 'muted' : '') + '">' + r.lift.toFixed(2) + '</span>', cls: 'num' }, r.count]));
+        return h;
+      }
+    };
+  };
+
   DM.models = M;
 })(window.DM);

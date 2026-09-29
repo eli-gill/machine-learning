@@ -103,6 +103,44 @@
     };
   }
 
+  // Shopping baskets with planted associations (bread & butter, beer & chips, pasta & sauce...).
+  const ITEMS = ['Bread', 'Butter', 'Milk', 'Eggs', 'Cheese', 'Beer', 'Chips', 'Salsa', 'Diapers', 'Wipes',
+    'Pasta', 'Pasta Sauce', 'Coffee', 'Sugar', 'Apples', 'Bananas', 'Yogurt', 'Cereal'];
+  let baskets = null;
+  function buildBaskets() {
+    if (baskets) return baskets;
+    const rand = U.rng(4242);
+    baskets = [];
+    for (let i = 0; i < 400; i++) {
+      const b = new Set();
+      ITEMS.forEach(it => { if (rand() < 0.1) b.add(it); });           // background noise
+      if (rand() < 0.35) { b.add('Bread'); if (rand() < 0.7) b.add('Butter'); if (rand() < 0.35) b.add('Milk'); }
+      if (rand() < 0.25) { b.add('Beer'); if (rand() < 0.75) b.add('Chips'); }
+      if (b.has('Chips') && rand() < 0.5) b.add('Salsa');
+      if (rand() < 0.15) { b.add('Diapers'); if (rand() < 0.6) b.add('Wipes'); if (rand() < 0.45) b.add('Beer'); }
+      if (rand() < 0.2) { b.add('Pasta'); if (rand() < 0.8) b.add('Pasta Sauce'); if (rand() < 0.4) b.add('Cheese'); }
+      if (rand() < 0.2) { b.add('Coffee'); if (rand() < 0.55) b.add('Sugar'); if (rand() < 0.3) b.add('Milk'); }
+      if (rand() < 0.2) { b.add('Cereal'); if (rand() < 0.65) b.add('Milk'); if (rand() < 0.3) b.add('Bananas'); }
+      if (!b.size) b.add(ITEMS[Math.floor(rand() * ITEMS.length)]);
+      baskets.push(ITEMS.filter(it => b.has(it)));
+    }
+    return baskets;
+  }
+  function basketsTransactional() {
+    const rows = [];
+    buildBaskets().forEach((b, i) => b.forEach(it => rows.push({ BasketID: i + 1, Item: it })));
+    return { fields: [{ name: 'BasketID', type: 'number' }, { name: 'Item', type: 'string' }], rows, meta: {} };
+  }
+  function basketsFlags() {
+    const cols = ITEMS.map(it => it.replace(/ /g, '_'));
+    const rows = buildBaskets().map((b, i) => {
+      const o = { BasketID: i + 1 };
+      ITEMS.forEach((it, j) => { o[cols[j]] = b.includes(it) ? 'T' : 'F'; });
+      return o;
+    });
+    return { fields: [{ name: 'BasketID', type: 'number' }].concat(cols.map(c => ({ name: c, type: 'string' }))), rows, meta: {} };
+  }
+
   const fromRows = (rows) => {
     const names = Object.keys(rows[0]);
     return { fields: names.map(n => ({ name: n, type: U.inferType(rows, n) })), rows: rows.map(r => Object.assign({}, r)), meta: {} };
@@ -112,6 +150,8 @@
     iris: { label: 'Iris flowers', desc: '150 flowers, 4 measurements, 3 species. Classic classification & clustering data.', build: iris },
     customers: { label: 'Telco customers', desc: '512 customer records with a Churn target. Contains missing values, messy Region text and duplicate rows. Join with "Telco usage" on CustomerID.', build: () => fromRows(buildTelco().customers) },
     usage: { label: 'Telco usage', desc: 'Monthly charges, support calls and data use per customer. Some customers are missing and some IDs have no customer.', build: () => fromRows(buildTelco().usage) },
+    baskets: { label: 'Grocery baskets', desc: '400 shopping baskets in transactional format: one row per item bought (BasketID, Item). Use with Apriori to find items bought together.', build: basketsTransactional },
+    basket_flags: { label: 'Grocery baskets (flags)', desc: 'The same 400 baskets in tabular format: one row per basket, one T/F field per product. Use with Apriori in tabular mode.', build: basketsFlags },
     housing: { label: 'House prices', desc: '300 houses with size, age, neighborhood and sale Price (a continuous target for regression).', build: housing }
   };
 })(window.DM);

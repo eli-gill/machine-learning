@@ -63,6 +63,16 @@
       ], [['n1', 'n2'], ['n2', 'n3'], ['n2', 'n4']])
     },
     {
+      label: 'Market baskets: association rules (Apriori)',
+      build: () => stream([
+        ['n1', 'sample_data', 40, 60, { dataset: 'baskets' }],
+        ['n2', 'distribution', 190, 0, { field: 'Item' }, 'Item popularity'],
+        ['n3', 'apriori', 210, 120, { format: 'transactional', idField: 'BasketID', itemField: 'Item', minSupport: 5, minConfidence: 50, sortBy: 'lift' }, 'Apriori (transactional)'],
+        ['n4', 'sample_data', 40, 260, { dataset: 'basket_flags' }],
+        ['n5', 'apriori', 210, 260, { format: 'tabular', items: 'flags', minSupport: 5, minConfidence: 50 }, 'Apriori (tabular flags)']
+      ], [['n1', 'n2'], ['n1', 'n3'], ['n4', 'n5']])
+    },
+    {
       label: 'Empty canvas',
       build: () => stream([], [])
     }
