@@ -167,6 +167,211 @@
       '<div class="bar-row"><span class="bar-name">' + U.esc(n) + '</span><span class="bar"><span style="width:' + (100 * v / tot).toFixed(1) + '%"></span></span><span class="bar-val">' + (v / tot).toFixed(3) + '</span></div>').join('') + '</div>';
   }
 
+  /* ---------- CHAID (chi-squared automatic interaction detection) ----------
+     A tree for a categorical target. At each node every input is grouped by merging the categories
+     whose class mix is not significantly different (chi-squared test); the input with the smallest
+     Bonferroni-adjusted p-value is used to split the node, with one child per merged group. */
+
+  // Upper tail of the chi-squared distribution: P(X > x) for df degrees of freedom (regularised incomplete gamma).
+  function chiSqP(x, df) {
+    if (!(df > 0)) return 1;
+    if (!(x > 0)) return 1;
+    const a = df / 2, z = x / 2, lg = lgamma(a);
+    if (z < a + 1) {   // series for the lower tail
+      let term = 1 / a, sum = term;
+      for (let n = 1; n < 500; n++) { term *= z / (a + n); sum += term; if (term < sum * 1e-14) break; }
+      return Math.max(0, 1 - sum * Math.exp(-z + a * Math.log(z) - lg));
+    }
+    // continued fraction (Lentz) for the upper tail
+    let b = z + 1 - a, c = 1 / 1e-300, d = 1 / b, h = d;
+    for (let i = 1; i < 500; i++) {
+      const an = -i * (i - a);
+      b += 2; d = an * d + b; if (Math.abs(d) < 1e-300) d = 1e-300;
+      c = b + an / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+      d = 1 / d; const del = d * c; h *= del;
+      if (Math.abs(del - 1) < 1e-14) break;
+    }
+    return Math.min(1, Math.exp(-z + a * Math.log(z) - lg) * h);
+  }
+  function lgamma(x) {   // Lanczos approximation
+    const g = [676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lgamma(1 - x);
+    x -= 1;
+    let s = 0.99999999999980993;
+    g.forEach((gi, i) => { s += gi / (x + i + 1); });
+    const t = x + g.length - 0.5;
+    return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(s);
+  }
+  M.chiSqP = chiSqP;
+
+  // Pearson chi-squared test on a table of count rows (one per group) by class columns; empty columns are ignored.
+  function chiSqTable(rowsCounts) {
+    const K = rowsCounts[0].length, colTot = new Array(K).fill(0), rowTot = rowsCounts.map(r => r.reduce((a, b) => a + b, 0));
+    rowsCounts.forEach(r => r.forEach((v, k) => { colTot[k] += v; }));
+    const total = rowTot.reduce((a, b) => a + b, 0), cols = colTot.filter(v => v > 0).length;
+    const df = (rowsCounts.length - 1) * (cols - 1);
+    if (df <= 0 || !total) return { chi: 0, df: 0, p: 1 };
+    let chi = 0;
+    rowsCounts.forEach((r, i) => r.forEach((v, k) => { if (colTot[k] > 0 && rowTot[i] > 0) { const e = rowTot[i] * colTot[k] / total; chi += (v - e) * (v - e) / e; } }));
+    return { chi, df, p: chiSqP(chi, df) };
+  }
+
+  // Stirling numbers of the second kind: ways to merge c categories into r groups (nominal Bonferroni multiplier).
+  function stirling2(c, r) {
+    let prev = new Array(r + 1).fill(0); prev[0] = 1;
+    for (let n = 1; n <= c; n++) {
+      const cur = new Array(r + 1).fill(0);
+      for (let k = 1; k <= Math.min(n, r); k++) cur[k] = k * prev[k] + prev[k - 1];
+      prev = cur;
+    }
+    return prev[r];
+  }
+  function choose(n, k) { if (k < 0 || k > n) return 0; let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; }
+
+  M.chaid = function (rows, inputs, types, target, kind, p) {
+    const classes = classList(rows, target), K = classes.length;
+    if (K < 2) throw new Error('The target needs at least two different values in the training data.');
+    const ci = new Map(classes.map((c, i) => [c.key, i]));
+    const y = rows.map(r => ci.get(String(r[target])));
+    const alphaSplit = p.alphaSplit === '' || p.alphaSplit == null ? 0.05 : +p.alphaSplit;
+    const alphaMerge = p.alphaMerge === '' || p.alphaMerge == null ? 0.05 : +p.alphaMerge;
+    const maxDepth = Math.max(1, Math.round(+p.maxDepth || 3)), minParent = Math.max(2, +p.minParent || 30), minChild = Math.max(1, +p.minChild || 10);
+    const nBins = Math.max(2, Math.round(+p.bins || 10));
+    const MISSING = '(missing)';
+
+    // Turn every input into category codes. Numbers become ordered bins; text stays unordered.
+    const cols = inputs.map(name => {
+      if (types[name] === 'number') {
+        const vals = U.nums(rows, name), distinct = [...new Set(vals)].sort((a, b) => a - b);
+        let edges;
+        if (distinct.length <= nBins) edges = distinct.slice(1).map((v, i) => (v + distinct[i]) / 2);
+        else { edges = []; for (let i = 1; i < nBins; i++) { const e = U.quantile(vals, i / nBins); if (!edges.length || e > edges[edges.length - 1]) edges.push(e); } }
+        const binOf = v => { let b = 0; while (b < edges.length && v > edges[b]) b++; return b; };
+        const miss = edges.length + 1;
+        return { name, num: true, edges, miss, codeOf: v => U.isNum(v) ? binOf(v) : miss, train: rows.map(r => U.isNum(r[name]) ? binOf(r[name]) : miss) };
+      }
+      const labels = new Map();
+      const lab = v => U.isMissing(v) ? MISSING : String(v);
+      rows.forEach(r => { const l = lab(r[name]); if (!labels.has(l)) labels.set(l, labels.size); });
+      const names = [...labels.keys()];
+      return { name, num: false, names, codeOf: v => labels.has(lab(v)) ? labels.get(lab(v)) : -1, train: rows.map(r => labels.get(lab(r[name]))) };
+    });
+
+    const importance = {};
+    inputs.forEach(n => { importance[n] = 0; });
+    const classCounts = idx => { const c = new Array(K).fill(0); idx.forEach(i => c[y[i]]++); return c; };
+
+    // Best grouping of one input's categories within the records idx; null when it cannot be split.
+    function groupColumn(col, idx) {
+      const byCode = new Map();
+      idx.forEach(i => { const c = col.train[i]; let g = byCode.get(c); if (!g) { g = { codes: [c], counts: new Array(K).fill(0), n: 0, floating: col.num && c === col.miss }; byCode.set(c, g); } g.counts[y[i]]++; g.n++; });
+      let groups = [...byCode.values()].sort((a, b) => a.codes[0] - b.codes[0]);
+      if (groups.length < 2) return null;
+      const cats = groups.length, hasMissing = col.num && byCode.has(col.miss);
+      const allowed = list => {   // pairs of groups that may be merged
+        const out = [];
+        if (!col.num) { for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) out.push([list[i], list[j]]); return out; }
+        const ordered = list.filter(g => !g.floating);
+        for (let i = 0; i + 1 < ordered.length; i++) out.push([ordered[i], ordered[i + 1]]);
+        list.filter(g => g.floating).forEach(f => ordered.forEach(o => out.push([f, o])));
+        return out;
+      };
+      const mergeInto = (a, b) => {
+        a.codes = a.codes.concat(b.codes).sort((x, z) => x - z); a.n += b.n; a.floating = a.floating && b.floating;
+        b.counts.forEach((v, k) => { a.counts[k] += v; });
+        groups = groups.filter(g => g !== b).sort((x, z) => x.codes[0] - z.codes[0]);
+      };
+      const pairP = (a, b) => chiSqTable([a.counts, b.counts]).p;
+      while (groups.length > 1) {   // merge the least different pair while it is not significant
+        let best = null;
+        allowed(groups).forEach(([a, b]) => { const pv = pairP(a, b); if (!best || pv > best.p) best = { a, b, p: pv }; });
+        if (!best || best.p <= alphaMerge) break;
+        mergeInto(best.a, best.b);
+      }
+      while (groups.length > 1) {   // then fold in groups that are too small to be a child node
+        const small = groups.filter(g => g.n < minChild).sort((a, b) => a.n - b.n)[0];
+        if (!small) break;
+        let best = null;
+        allowed(groups).filter(pr => pr.includes(small)).forEach(([a, b]) => { const pv = pairP(a, b); if (!best || pv > best.p) best = { a, b, p: pv }; });
+        if (!best) break;
+        mergeInto(best.a, best.b);
+      }
+      if (groups.length < 2) return null;
+      const test = chiSqTable(groups.map(g => g.counts));
+      const r = groups.length;
+      let mult;
+      if (col.num) {
+        const c0 = cats - (hasMissing ? 1 : 0), r0 = groups.filter(g => g.codes.some(c => c !== col.miss)).length;
+        mult = choose(Math.max(0, c0 - 1), Math.max(0, r0 - 1)) * (hasMissing ? r : 1);
+      } else mult = stirling2(cats, r);
+      return { col, groups, chi: test.chi, df: test.df, p: Math.min(1, test.p * Math.max(1, mult)) };
+    }
+
+    function build(idx, depth) {
+      const n = idx.length, counts = classCounts(idx);
+      let b = 0; counts.forEach((v, i) => { if (v > counts[b]) b = i; });
+      const node = { n, counts, pred: b, conf: counts[b] / n };
+      if (depth >= maxDepth || n < minParent || counts[b] === n) return node;
+      let best = null;
+      cols.forEach(col => {
+        const g = groupColumn(col, idx);
+        if (g && g.df > 0 && (!best || g.p < best.p || (g.p === best.p && g.chi > best.chi))) best = g;
+      });
+      if (!best || best.p >= alphaSplit) return node;
+      importance[best.col.name] += best.chi;
+      const codeToGroup = new Map();
+      best.groups.forEach((g, gi) => g.codes.forEach(c => codeToGroup.set(c, gi)));
+      node.split = { col: best.col, groups: best.groups.map(g => ({ codes: g.codes })), codeToGroup, chi: best.chi, df: best.df, p: best.p };
+      node.children = best.groups.map((g, gi) => build(idx.filter(i => codeToGroup.get(best.col.train[i]) === gi), depth + 1));
+      return node;
+    }
+    const root = build(rows.map((_, i) => i), 0);
+
+    function leafOf(r) {
+      let nd = root;
+      while (nd.split) {
+        const gi = nd.split.codeToGroup.get(nd.split.col.codeOf(r[nd.split.col.name]));
+        if (gi === undefined) break;   // a value never seen in training: keep this node's prediction
+        nd = nd.children[gi];
+      }
+      return nd;
+    }
+
+    function condition(col, codes) {
+      const f = U.esc(col.name);
+      if (!col.num) return codes.length === 1 ? f + ' = "' + U.esc(col.names[codes[0]]) + '"' : f + ' in {' + codes.map(c => '"' + U.esc(col.names[c]) + '"').join(', ') + '}';
+      const real = codes.filter(c => c !== col.miss), hasMiss = codes.length !== real.length;
+      if (!real.length) return f + ' is missing';
+      const lo = Math.min(...real), hi = Math.max(...real);
+      const lower = lo > 0 ? col.edges[lo - 1] : -Infinity, upper = hi < col.edges.length ? col.edges[hi] : Infinity;
+      let t;
+      if (lower === -Infinity && upper === Infinity) t = f + ' (any value)';
+      else if (lower === -Infinity) t = f + ' ≤ ' + U.fmt(upper);
+      else if (upper === Infinity) t = f + ' &gt; ' + U.fmt(lower);
+      else t = U.fmt(lower) + ' &lt; ' + f + ' ≤ ' + U.fmt(upper);
+      return t + (hasMiss ? ' or missing' : '');
+    }
+    const leafText = nd => '<b>' + U.esc(classes[nd.pred].key) + '</b> <span class="muted">(' + U.pct(nd.conf) + ', n=' + nd.n + ')</span>';
+    function render(nd) {
+      if (!nd.split) return '';
+      const s = nd.split;
+      return '<div class="muted">split on <b>' + U.esc(s.col.name) + '</b>: χ² = ' + U.fmt(s.chi, 3) + ', df = ' + s.df + ', adjusted p = ' + (s.p < 0.0001 ? '&lt; 0.0001' : U.fmt(s.p, 3)) + '</div><ul>' +
+        s.groups.map((g, gi) => { const ch = nd.children[gi]; return '<li><span class="cond">' + condition(s.col, g.codes) + '</span>' + (ch.split ? ' <span class="muted">(n=' + ch.n + ')</span>' + render(ch) : ' → ' + leafText(ch)) + '</li>'; }).join('') + '</ul>';
+    }
+    let leaves = 0, depth = 0;
+    (function walk(nd, d) { depth = Math.max(depth, d); if (!nd.split) leaves++; else nd.children.forEach(c => walk(c, d + 1)); })(root, 0);
+
+    return {
+      predict(r) { const nd = leafOf(r); return { pred: classes[nd.pred].value, conf: nd.conf }; },
+      summary() {
+        return '<h3>CHAID tree</h3><p class="muted">' + leaves + ' leaves, depth ' + depth + '. Categories whose outcomes are not significantly different (merge p &gt; ' + alphaMerge + ') are grouped together; ' +
+          'a node splits only if the adjusted p-value is below ' + alphaSplit + '. Numeric inputs are cut into up to ' + nBins + ' bins first.</p>' +
+          '<div class="tree">' + (root.split ? '<div><span class="cond">All records</span> <span class="muted">(n=' + root.n + ')</span></div>' + render(root) : 'No significant split found. Prediction for every record: ' + leafText(root)) + '</div>' +
+          importanceHtml(importance);
+      }
+    };
+  };
+
   /* ---------- Logistic regression (softmax, gradient descent) ---------- */
   M.logistic = function (rows, inputs, types, target, kind, p) {
     const classes = classList(rows, target), K = classes.length;
@@ -335,26 +540,24 @@
   };
 
   /* ---------- K-Means clustering ---------- */
-  M.kmeans = function (rows, inputs, types, p) {
-    const K = Math.max(2, Math.round(+p.k || 3)), rand = U.rng(+p.seed || 1);
-    const enc = M.encoder(rows, inputs, types);
-    const X = rows.map(r => enc.encode(r));
-    if (X.length < K) throw new Error('Need at least ' + K + ' records for ' + K + ' clusters.');
-    const dist = (a, b) => { let d = 0; for (let j = 0; j < a.length; j++) { const t = a[j] - b[j]; d += t * t; } return d; };
-    // k-means++ initialisation
+  const sqDist = (a, b) => { let d = 0; for (let j = 0; j < a.length; j++) { const t = a[j] - b[j]; d += t * t; } return d; };
+
+  // Core k-means loop (k-means++ start). Returns the centres C, each point's cluster and the iterations used.
+  function kmeansFit(X, K, rand, maxIter) {
     const C = [X[Math.floor(rand() * X.length)].slice()];
     while (C.length < K) {
-      const d = X.map(x => Math.min(...C.map(c => dist(x, c))));
+      const d = X.map(x => Math.min(...C.map(c => sqDist(x, c))));
       let r = rand() * d.reduce((a, b) => a + b, 0), idx = 0;
       for (; idx < d.length - 1; idx++) { r -= d[idx]; if (r <= 0) break; }
       C.push(X[idx].slice());
     }
-    let assign = new Array(X.length).fill(-1), iter = 0;
-    for (; iter < (+p.iterations || 50); iter++) {
+    const assign = new Array(X.length).fill(-1);
+    let iter = 0;
+    for (; iter < maxIter; iter++) {
       let changed = false;
       X.forEach((x, i) => {
         let b = 0, bd = Infinity;
-        C.forEach((c, k) => { const d = dist(x, c); if (d < bd) { bd = d; b = k; } });
+        C.forEach((c, k) => { const d = sqDist(x, c); if (d < bd) { bd = d; b = k; } });
         if (assign[i] !== b) { assign[i] = b; changed = true; }
       });
       C.forEach((c, k) => {
@@ -363,16 +566,143 @@
       });
       if (!changed) break;
     }
-    const nearest = x => { let b = 0, bd = Infinity; C.forEach((c, k) => { const d = dist(x, c); if (d < bd) { bd = d; b = k; } }); return { k: b, d: Math.sqrt(bd) }; };
+    return { C, assign, iter };
+  }
+
+  // Equal-width histogram of distances (or anomaly indexes) as a small SVG, with a marker at the anomaly cutoff.
+  function distanceChart(dists, cutoff, label) {
+    const hi = Math.max(...dists, cutoff), bins = 20, w = hi / bins || 1, counts = new Array(bins).fill(0);
+    dists.forEach(d => { counts[Math.min(bins - 1, Math.floor(d / w))]++; });
+    const mx = Math.max(1, ...counts), W = 460, H = 120, bw = W / bins;
+    let s = '<svg viewBox="0 0 ' + W + ' ' + (H + 18) + '" width="' + W + '" height="' + (H + 18) + '" class="spark">';
+    counts.forEach((c, i) => {
+      const h = c / mx * (H - 4), anomalous = (i + 0.5) * w > cutoff;
+      s += '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + (H - h).toFixed(1) + '" width="' + (bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + (anomalous ? '#c8453c' : '#3b6fb6') + '"/>';
+    });
+    const cx = Math.min(W, cutoff / hi * W);
+    s += '<line x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="0" y2="' + H + '" stroke="#333" stroke-dasharray="4 3"/>';
+    s += '<text x="0" y="' + (H + 13) + '" font-size="10" fill="#666">0</text><text x="' + W + '" y="' + (H + 13) + '" font-size="10" fill="#666" text-anchor="end">' + U.esc(U.fmt(hi, 3)) + ' (' + U.esc(label || 'distance from centre') + ')</text>';
+    return s + '</svg>';
+  }
+
+  /* single: true = one cluster; each record's distance from the centre is its anomaly score.
+     p.anomalyPct = share of training records (the furthest ones) to flag as anomalies. */
+  M.kmeans = function (rows, inputs, types, p) {
+    const single = p.mode === 'single';
+    const K = single ? 1 : Math.max(2, Math.round(+p.k || 3)), rand = U.rng(+p.seed || 1);
+    const enc = M.encoder(rows, inputs, types);
+    const X = rows.map(r => enc.encode(r));
+    if (X.length < (single ? 2 : K)) throw new Error('Need at least ' + (single ? 2 : K) + ' records for ' + (single ? 'single-cluster mode' : K + ' clusters') + '.');
+    const { C, assign, iter } = kmeansFit(X, K, rand, +p.iterations || 50);
+    const nearest = x => { let b = 0, bd = Infinity; C.forEach((c, k) => { const d = sqDist(x, c); if (d < bd) { bd = d; b = k; } }); return { k: b, d: Math.sqrt(bd) }; };
+    let cutoff = null, meanDist = 1, trainDist = null;
+    if (single) {
+      const pct = Math.min(50, Math.max(0.1, p.anomalyPct === '' || p.anomalyPct == null ? 5 : +p.anomalyPct || 5));
+      trainDist = X.map(x => nearest(x).d);
+      cutoff = U.quantile(trainDist, 1 - pct / 100);
+      meanDist = U.mean(trainDist) || 1;
+    }
     return {
-      predict(r) { const nb = nearest(enc.encode(r)); return { pred: 'cluster-' + (nb.k + 1), conf: nb.d }; },
+      predict(r) {
+        const nb = nearest(enc.encode(r));
+        const res = { pred: 'cluster-' + (nb.k + 1), conf: nb.d };
+        if (single) { res.index = nb.d / meanDist; res.anomaly = nb.d > cutoff; }
+        return res;
+      },
       summary() {
+        if (single) {
+          const flagged = trainDist.filter(d => d > cutoff).length, sd = U.std(trainDist);
+          let h = '<p>Single-cluster mode: all records belong to one cluster, so each record\'s <b>distance from the cluster centre</b> measures how unusual it is.</p>';
+          h += '<h3>Distance from the centre (training records)</h3>' + U.simpleTable(['Mean', 'Std dev', 'Maximum', 'Anomaly cutoff', 'Flagged'],
+            [[meanDist, sd, Math.max(...trainDist), cutoff, flagged + ' (' + U.pct(flagged / trainDist.length) + ')']]);
+          h += distanceChart(trainDist, cutoff);
+          h += '<p class="muted"><b>Anomaly index</b> = distance ÷ mean training distance (1 = typical). Records with a distance above the cutoff are flagged. Inputs are standardized, so each field counts equally.</p>';
+          h += '<h3>Cluster centre</h3><p class="muted">Numbers: mean. Categories: most common value.</p>' +
+            U.simpleTable(['Input', 'Centre'], inputs.map(name => [name, types[name] === 'number' ? U.fmt(U.mean(U.nums(rows, name))) : String(U.mode(rows, name) == null ? '' : U.mode(rows, name))]));
+          return h;
+        }
         const groups = C.map((_, k) => rows.filter((__, i) => assign[i] === k));
         let h = '<p>' + K + ' clusters found after ' + (iter + 1) + ' iterations.</p>';
         h += '<h3>Cluster profiles</h3><p class="muted">Numbers: mean within the cluster. Categories: most common value.</p>';
         h += U.simpleTable(['Input'].concat(C.map((_, k) => 'cluster-' + (k + 1))),
           [['Records'].concat(groups.map(g => g.length + ' (' + U.pct(g.length / rows.length) + ')'))].concat(inputs.map(name =>
             [name].concat(groups.map(g => types[name] === 'number' ? U.fmt(U.mean(U.nums(g, name))) : String(U.mode(g, name) == null ? '' : U.mode(g, name)))))));
+        return h;
+      }
+    };
+  };
+
+  /* ---------- Anomaly detection (cluster-based, like SPSS Modeler's Anomaly node) ----------
+     Training records are grouped into peer groups with k-means. A record's anomaly index is its distance
+     from its own peer group's centre divided by that group's average distance, so 1 is typical and large
+     values are unusual. Records whose index is over the cutoff are flagged. */
+  M.anomaly = function (rows, inputs, types, p) {
+    const K = Math.max(1, Math.round(+p.peerGroups || 3)), rand = U.rng(+p.seed || 1);
+    const enc = M.encoder(rows, inputs, types), X = rows.map(r => enc.encode(r));
+    if (X.length < Math.max(2, K)) throw new Error('Need at least ' + Math.max(2, K) + ' training records for ' + K + ' peer group' + (K > 1 ? 's' : '') + '.');
+    const { C, assign } = kmeansFit(X, K, rand, +p.iterations || 50);
+
+    // which input field does each encoded column belong to?
+    const dimField = [];
+    enc.specs.forEach((s, fi) => { const w = s.kind === 'num' ? 1 : s.cats.length; for (let j = 0; j < w; j++) dimField.push(fi); });
+    const score = x => {
+      let b = 0, bd = Infinity;
+      C.forEach((c, k) => { const d = sqDist(x, c); if (d < bd) { bd = d; b = k; } });
+      return { k: b, d: Math.sqrt(bd) };
+    };
+    const trainScores = X.map(score);
+    const groupMean = C.map((_, k) => { const d = trainScores.filter(s => s.k === k).map(s => s.d); return d.length ? U.mean(d) : NaN; });
+    const allMean = U.mean(trainScores.map(s => s.d));
+    const meanOf = k => (groupMean[k] > 1e-9 ? groupMean[k] : (allMean > 1e-9 ? allMean : 1));
+    const indexOf = s => s.d / meanOf(s.k);
+    const trainIdx = trainScores.map(indexOf);
+
+    const method = p.method === 'index' ? 'index' : 'pct';
+    const pct = Math.min(50, Math.max(0.1, p.anomalyPct === '' || p.anomalyPct == null ? 5 : +p.anomalyPct || 5));
+    const cutoff = method === 'index' ? (+p.indexCutoff > 0 ? +p.indexCutoff : 2) : U.quantile(trainIdx, 1 - pct / 100);
+
+    // share of a record's squared distance contributed by each input field
+    function contributions(x, k) {
+      const sh = new Array(inputs.length).fill(0);
+      x.forEach((v, j) => { const t = v - C[k][j]; sh[dimField[j]] += t * t; });
+      const tot = sh.reduce((a, b) => a + b, 0) || 1;
+      return sh.map(v => v / tot);
+    }
+    function reasonOf(x, k) {
+      const sh = contributions(x, k);
+      let b = 0; sh.forEach((v, i) => { if (v > sh[b]) b = i; });
+      return { field: inputs[b], share: sh[b] };
+    }
+
+    const flaggedTrain = trainIdx.map(v => v > cutoff);
+    return {
+      predict(r) {
+        const x = enc.encode(r), s = score(x), idx = indexOf(s), anomaly = idx > cutoff;
+        const out = { pred: anomaly ? 'anomaly' : 'normal', conf: idx, peer: 'peer-' + (s.k + 1) };
+        if (anomaly) { const re = reasonOf(x, s.k); out.reason = re.field; out.share = re.share; }
+        return out;
+      },
+      summary() {
+        const nFlag = flaggedTrain.filter(Boolean).length;
+        let h = '<p>' + K + ' peer group' + (K > 1 ? 's' : '') + ' found. A record is flagged when its anomaly index is above <b>' + U.fmt(cutoff, 3) + '</b>' +
+          (method === 'pct' ? ' (the top ' + U.fmt(pct) + '% of training records)' : '') + '. ' + nFlag + ' of ' + rows.length + ' training records (' + U.pct(nFlag / rows.length) + ') are flagged.</p>';
+        h += '<h3>Anomaly index (training records)</h3>' + distanceChart(trainIdx, cutoff, 'anomaly index') +
+          '<p class="muted">Anomaly index = distance from the peer group centre ÷ the group\'s average distance. 1 is typical; the dashed line is the cutoff. Inputs are standardized so each field counts equally.</p>';
+        h += '<h3>Peer groups</h3>' + U.simpleTable(['Peer group', 'Records', 'Average distance', 'Flagged'], C.map((_, k) => {
+          const n = trainScores.filter(s => s.k === k).length, f = trainScores.filter((s, i) => s.k === k && flaggedTrain[i]).length;
+          return ['peer-' + (k + 1), n, groupMean[k], f];
+        }));
+        const reasons = new Map();
+        X.forEach((x, i) => { if (flaggedTrain[i]) { const f = reasonOf(x, trainScores[i].k).field; reasons.set(f, (reasons.get(f) || 0) + 1); } });
+        if (reasons.size) {
+          h += '<h3>Fields behind the anomalies</h3><p class="muted">For each flagged training record, the input that contributes most to its distance from the peer group centre.</p>' +
+            U.simpleTable(['Field', 'Flagged records'], [...reasons.entries()].sort((a, b) => b[1] - a[1]));
+        }
+        const top = trainIdx.map((v, i) => i).sort((a, b) => trainIdx[b] - trainIdx[a]).slice(0, 10);
+        h += '<h3>Most anomalous training records</h3>' + U.simpleTable(['Record #', 'Anomaly index', 'Peer group', 'Main field', 'Share of distance'], top.map(i => {
+          const re = reasonOf(X[i], trainScores[i].k);
+          return [i + 1, trainIdx[i], 'peer-' + (trainScores[i].k + 1), re.field, U.pct(re.share)];
+        })) + '<p class="muted">Record # is the position among the records the model was trained on.</p>';
         return h;
       }
     };

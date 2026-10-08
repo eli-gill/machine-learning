@@ -36,8 +36,10 @@
         ['n5', 'tree', 350, 240, { target: 'Species', maxDepth: 3, minLeaf: 3 }],
         ['n6', 'analysis', 500, 60, {}],
         ['n7', 'analysis', 500, 240, {}],
-        ['n8', 'table', 500, 380, {}]
-      ], [['n1', 'n2'], ['n1', 'n3'], ['n3', 'n4'], ['n3', 'n5'], ['n4', 'n6'], ['n5', 'n7'], ['n5', 'n8']])
+        ['n8', 'table', 500, 380, {}],
+        ['n9', 'chaid', 350, 400, { target: 'Species', maxDepth: 3, minParent: 20, minChild: 5 }],
+        ['n10', 'analysis', 500, 500, {}, 'CHAID accuracy']
+      ], [['n1', 'n2'], ['n1', 'n3'], ['n3', 'n4'], ['n3', 'n5'], ['n4', 'n6'], ['n5', 'n7'], ['n5', 'n8'], ['n3', 'n9'], ['n9', 'n10']])
     },
     {
       label: 'House prices: regression',
@@ -61,6 +63,18 @@
         ['n3', 'plot', 340, 30, { x: 'Petal_Length', y: 'Petal_Width', color: '$KM-K-Means' }],
         ['n4', 'distribution', 340, 210, { field: '$KM-K-Means', overlay: 'Species' }, 'Clusters vs species']
       ], [['n1', 'n2'], ['n2', 'n3'], ['n2', 'n4']])
+    },
+    {
+      label: 'Iris: anomaly detection',
+      build: () => stream([
+        ['n1', 'sample_data', 40, 150, { dataset: 'iris' }],
+        ['n2', 'kmeans', 200, 60, { mode: 'single', anomalyPct: 5, inputs: ['Sepal_Length', 'Sepal_Width', 'Petal_Length', 'Petal_Width'] }, 'K-Means (single cluster)'],
+        ['n3', 'plot', 370, 20, { x: 'Sepal_Width', y: 'Petal_Length', color: '$KMA-K-Means' }, 'K-Means anomalies'],
+        ['n4', 'partition', 200, 240, { train: 70, seed: 3 }],
+        ['n5', 'anomaly', 340, 240, { inputs: ['Sepal_Length', 'Sepal_Width', 'Petal_Length', 'Petal_Width'], peerGroups: 3, anomalyPct: 5 }],
+        ['n6', 'plot', 500, 190, { x: 'Sepal_Width', y: 'Petal_Length', color: '$O-Anomaly' }, 'Anomaly node'],
+        ['n7', 'table', 500, 310, {}, 'Scores and reasons']
+      ], [['n1', 'n2'], ['n2', 'n3'], ['n1', 'n4'], ['n4', 'n5'], ['n5', 'n6'], ['n5', 'n7']])
     },
     {
       label: 'Market baskets: association rules (Apriori)',
