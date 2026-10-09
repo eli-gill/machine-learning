@@ -555,23 +555,75 @@
     desc: 'Probabilistic classifier that treats inputs as independent given the class.',
     params: [{ key: 'laplace', label: 'Laplace smoothing', type: 'number', default: 1 }] });
 
+  T.chaid = modelNode({ label: 'CHAID', glyph: '⋕', algo: 'chaid', prefix: 'CH', kinds: ['categorical'],
+    desc: 'Chi-squared tree: like a Decision Tree, but a node can split into more than two branches, grouping together the categories that behave alike.',
+    params: [
+      { key: 'maxDepth', label: 'Maximum depth', type: 'number', default: 3 },
+      { key: 'minParent', label: 'Minimum records to split a node', type: 'number', default: 30 },
+      { key: 'minChild', label: 'Minimum records per branch', type: 'number', default: 10 },
+      { key: 'alphaSplit', label: 'Significance level for splitting', type: 'number', default: 0.05 },
+      { key: 'alphaMerge', label: 'Significance level for merging categories', type: 'number', default: 0.05 },
+      { key: 'bins', label: 'Bins for numeric inputs', type: 'number', default: 10 }] });
+
   T.kmeans = {
     cat: 'modeling', label: 'K-Means', glyph: '⁂', inputs: 1, model: true,
-    desc: 'Clustering: groups similar records together. No target needed.',
+    desc: 'Clustering: groups similar records together. No target needed. Single-cluster mode scores how far each record is from the centre, for anomaly detection.',
     params: [
       { key: 'inputs', label: 'Inputs (none checked = all fields except IDs, Partition and $ fields)', type: 'fields' },
-      { key: 'k', label: 'Number of clusters', type: 'number', default: 3 },
+      { key: 'mode', label: 'Mode', type: 'select', default: 'multi', options: [
+        { v: 'multi', l: 'Find several clusters' },
+        { v: 'single', l: 'Single cluster: distance from the centre (anomaly detection)' }] },
+      { key: 'k', label: 'Number of clusters', type: 'number', default: 3, showIf: p => p.mode !== 'single' },
+      { key: 'anomalyPct', label: 'Flag the furthest % of records as anomalies', type: 'number', default: 5, showIf: p => p.mode === 'single' },
+      { key: 'seed', label: 'Random seed', type: 'number', default: 1 }
+    ],
+    exec(inp, p, ctx) {
+      const t = inp[0], inputs = resolveInputs(t, p, null), single = p.mode === 'single';
+      if (!inputs.length) throw new Error('No input fields to cluster on.');
+      const m = DM.models.kmeans(t.rows, inputs, types(t), p);
+      let fields = U.setField(U.setField(t.fields, '$KM-K-Means', 'string'), '$KMD-K-Means', 'number');
+      if (single) fields = U.setField(U.setField(fields, '$KMI-K-Means', 'number'), '$KMA-K-Means', 'string');
+      const rows = t.rows.map(r => {
+        const res = m.predict(r), o = Object.assign({}, r, { '$KM-K-Means': res.pred, '$KMD-K-Means': +res.conf.toFixed(4) });
+        if (single) { o['$KMI-K-Means'] = +res.index.toFixed(4); o['$KMA-K-Means'] = res.anomaly ? 'anomaly' : 'normal'; }
+        return o;
+      });
+      const head = '<p class="model-head"><b>K-Means</b>' + (single ? ' (single cluster)' : '') + ' on ' + t.rows.length + ' records. Inputs: ' + inputs.map(U.esc).join(', ') +
+        '.<br>Adds <code>$KM-K-Means</code> (cluster) and <code>$KMD-K-Means</code> (distance to cluster centre)' +
+        (single ? ', <code>$KMI-K-Means</code> (anomaly index: distance relative to the average) and <code>$KMA-K-Means</code> (<i>anomaly</i> or <i>normal</i>)' : '') + '.</p>';
+      return { data: table(t, fields, rows), model: { title: single ? 'K-Means (single cluster)' : 'K-Means (' + p.k + ' clusters)', html: head + m.summary() } };
+    }
+  };
+
+  T.anomaly = {
+    cat: 'modeling', label: 'Anomaly Detection', glyph: '⚠', inputs: 1, model: true,
+    desc: 'Finds unusual records. Groups the training records into peer groups, then scores how far each record is from its own group. No target needed.',
+    params: [
+      { key: 'inputs', label: 'Inputs (none checked = all fields except IDs, Partition and $ fields)', type: 'fields' },
+      { key: 'peerGroups', label: 'Number of peer groups (1 = compare with everyone)', type: 'number', default: 3 },
+      { key: 'method', label: 'Flag anomalies by', type: 'select', default: 'pct', options: [
+        { v: 'pct', l: 'The top % of training records' },
+        { v: 'index', l: 'An anomaly index cutoff' }] },
+      { key: 'anomalyPct', label: 'Top % of records to flag', type: 'number', default: 5, showIf: p => p.method !== 'index' },
+      { key: 'indexCutoff', label: 'Anomaly index cutoff (1 = typical; 2 is a common choice)', type: 'number', default: 2, showIf: p => p.method === 'index' },
       { key: 'seed', label: 'Random seed', type: 'number', default: 1 }
     ],
     exec(inp, p, ctx) {
       const t = inp[0], inputs = resolveInputs(t, p, null);
-      if (!inputs.length) throw new Error('No input fields to cluster on.');
-      const m = DM.models.kmeans(t.rows, inputs, types(t), p);
-      const rows = t.rows.map(r => { const res = m.predict(r); return Object.assign({}, r, { '$KM-K-Means': res.pred, '$KMD-K-Means': +res.conf.toFixed(4) }); });
-      const fields = U.setField(U.setField(t.fields, '$KM-K-Means', 'string'), '$KMD-K-Means', 'number');
-      const head = '<p class="model-head"><b>K-Means</b> on ' + t.rows.length + ' records. Inputs: ' + inputs.map(U.esc).join(', ') +
-        '.<br>Adds <code>$KM-K-Means</code> (cluster) and <code>$KMD-K-Means</code> (distance to cluster centre).</p>';
-      return { data: table(t, fields, rows), model: { title: 'K-Means (' + p.k + ' clusters)', html: head + m.summary() } };
+      if (!inputs.length) throw new Error('No input fields to learn from.');
+      const part = t.meta.partition && U.field(t, t.meta.partition) ? t.meta.partition : null;
+      const train = t.rows.filter(r => !part || r[part] === TRAIN);
+      const m = DM.models.anomaly(train, inputs, types(t), p);
+      let fields = t.fields;
+      ['$O-Anomaly:string', '$OA-Anomaly:number', '$OP-Anomaly:string', '$OR-Anomaly:string'].forEach(s => { const [n, ty] = s.split(':'); fields = U.setField(fields, n, ty); });
+      const rows = t.rows.map(r => {
+        const res = m.predict(r);
+        return Object.assign({}, r, { '$O-Anomaly': res.pred, '$OA-Anomaly': +res.conf.toFixed(4), '$OP-Anomaly': res.peer, '$OR-Anomaly': res.reason == null ? null : res.reason });
+      });
+      const head = '<p class="model-head"><b>Anomaly Detection</b> trained on ' + train.length + (part ? ' Training-partition' : '') + ' records. Inputs: ' + inputs.map(U.esc).join(', ') + '.<br>' +
+        'Adds <code>$O-Anomaly</code> (<i>anomaly</i> or <i>normal</i>), <code>$OA-Anomaly</code> (anomaly index), <code>$OP-Anomaly</code> (peer group) and <code>$OR-Anomaly</code> (field contributing most, for anomalies).</p>' +
+        (part ? '' : '<p class="warn">No Partition node upstream: the model was trained on all records.</p>');
+      return { data: table(t, fields, rows), model: { title: 'Anomaly Detection', html: head + m.summary() } };
     }
   };
 

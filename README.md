@@ -15,7 +15,7 @@ All data stays in the browser.
 | **Record Ops** | Select, Sample, Sort, Distinct, **Merge** (inner / left / right / full join), Append, Aggregate |
 | **Field Ops** | Filter (drop/rename), Type (number ↔ text), Fill Missing, Clean Text, Derive (formula), Binning, **Partition** |
 | **Graphs** | Distribution (bar chart / histogram with optional overlay), Plot (scatter) |
-| **Modeling** | Decision Tree, Logistic Regression, Linear Regression, KNN, Naive Bayes, K-Means, **Apriori** (association rules) |
+| **Modeling** | Decision Tree, **CHAID**, Logistic Regression, Linear Regression, KNN, Naive Bayes, K-Means (several clusters or **single-cluster** anomaly scoring), **Anomaly Detection**, **Apriori** (association rules) |
 | **Output** | Table, Data Audit, **Analysis** (accuracy, confusion matrix, MAE/RMSE/R² for Training vs Testing), Export (CSV or Excel `.xlsx`) |
 
 - Node shapes follow the SPSS Modeler convention: circle = source, hexagon = operation, triangle = graph, pentagon = model, square = output.
@@ -23,7 +23,10 @@ All data stays in the browser.
 - **Excel files**: the CSV / Excel File node opens `.xlsx` / `.xlsm` workbooks (pick the sheet if there is more than one; the first non-empty row is the header; dates become `YYYY-MM-DD` text; formulas use the value Excel last saved). The Export node can write `.xlsx` as well as CSV. Old `.xls` files must be re-saved as `.xlsx`. Reading needs a browser with `DecompressionStream` (current Chrome, Edge, Firefox, Safari).
 - Streams auto-save in the browser. **Save** / **Open…** download and load a `.json` file (useful for handing in work).
 - Apriori finds association rules ("if Bread & Diapers then Wipes") with support, confidence and lift. It accepts **transactional** data (a transaction ID field + an item field, one row per item) or **tabular** data (one row per transaction, with T/F flag fields or `Field = value` items).
-- Five example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification, house-price regression, K-Means clustering, and market-basket association rules.
+- **CHAID** is a chi-squared tree for a categorical target. Unlike the Decision Tree it can split a node into more than two branches, merging categories (or numeric bins) whose outcomes are not significantly different. Splits use Bonferroni-adjusted p-values; you can set the split and merge significance levels, the depth, and minimum records per node and branch.
+- **K-Means** has a *Single cluster* mode: every record goes into one cluster and its distance from the centre is its anomaly score. It adds `$KMD-` (distance), `$KMI-` (anomaly index = distance ÷ average distance) and `$KMA-` (*anomaly* / *normal*, flagging the furthest N% of records).
+- **Anomaly Detection** is a separate model that needs no target. It groups the Training records into peer groups with k-means, scores each record against its own group (`$OA-` anomaly index, `$OP-` peer group), flags unusual ones (`$O-`, by top % or by index cutoff) and names the field contributing most (`$OR-`).
+- Six example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification (including CHAID), house-price regression, K-Means clustering, Iris anomaly detection, and market-basket association rules.
 
 ### Built-in datasets
 
@@ -67,7 +70,7 @@ css/style.css     all styling
 js/util.js        CSV parsing, statistics, tables, SVG charts
 js/xlsx.js        Excel (.xlsx) reader and writer (zip + XML, no libraries)
 js/datasets.js    built-in sample data
-js/models.js      algorithms (CART tree, softmax logistic, least squares, KNN, Naive Bayes, K-Means, Apriori)
+js/models.js      algorithms (CART tree, CHAID, softmax logistic, least squares, KNN, Naive Bayes, K-Means, anomaly detection, Apriori)
 js/nodes.js       node types: palette category, settings and exec()
 js/examples.js    example streams
 js/app.js         canvas editor, settings dialogs, execution engine, outputs/models panel
