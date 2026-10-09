@@ -585,6 +585,60 @@
     return s + '</svg>';
   }
 
+  /* Silhouette of a clustering (Kaufman & Rousseeuw). For each record: a = mean distance to the other
+     records in its own cluster, b = smallest mean distance to the records of any other cluster, and
+     silhouette = (b - a) / max(a, b). It runs from -1 (probably in the wrong cluster) through 0 (on the
+     border) to +1 (well inside its cluster). Distances are Euclidean in the standardized input space.
+     Every record is scored when there are at most SIL_FULL; with more, a seeded sample of SIL_SAMPLE
+     records is scored against all the others (an estimate), because the exact method compares every pair. */
+  const SIL_FULL = 2000, SIL_SAMPLE = 1000;
+  function silhouette(X, labels, K, seed) {
+    const n = X.length, size = new Array(K).fill(0);
+    labels.forEach(k => { size[k]++; });
+    if (size.filter(v => v > 0).length < 2) return null;   // needs at least two non-empty clusters
+    let idx = X.map((_, i) => i);
+    const sampled = n > SIL_FULL;
+    if (sampled) {
+      const rand = U.rng(seed);
+      for (let i = 0; i < SIL_SAMPLE; i++) { const j = i + Math.floor(rand() * (n - i)); const t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+      idx = idx.slice(0, SIL_SAMPLE).sort((a, b) => a - b);
+    }
+    const values = sampled ? null : new Array(n).fill(0), sum = new Array(K).fill(0), cnt = new Array(K).fill(0);
+    let total = 0;
+    idx.forEach(i => {
+      const own = labels[i], d = new Array(K).fill(0);
+      for (let j = 0; j < n; j++) if (j !== i) d[labels[j]] += Math.sqrt(sqDist(X[i], X[j]));
+      let s = 0;
+      if (size[own] > 1) {   // a lone record in its cluster scores 0 by convention
+        const a = d[own] / (size[own] - 1);
+        let b = Infinity;
+        for (let k = 0; k < K; k++) if (k !== own && size[k] > 0) b = Math.min(b, d[k] / size[k]);
+        const m = Math.max(a, b);
+        s = m > 0 ? (b - a) / m : 0;
+      }
+      if (values) values[i] = s;
+      sum[own] += s; cnt[own]++; total += s;
+    });
+    return {
+      mean: total / idx.length, values, sampled: sampled ? idx.length : 0,
+      negative: values ? values.filter(v => v < 0).length : null,
+      perCluster: sum.map((v, k) => ({ n: size[k], scored: cnt[k], mean: cnt[k] ? v / cnt[k] : null }))
+    };
+  }
+  function silhouetteLabel(v) {   // Kaufman & Rousseeuw's rule of thumb
+    return v > 0.7 ? 'strong structure' : v > 0.5 ? 'reasonable structure' : v > 0.25 ? 'weak structure, clusters may be artificial' : 'no substantial structure';
+  }
+  function silhouetteHtml(sil, names, what) {
+    if (!sil) return '<h3>Cluster quality (silhouette)</h3><p class="muted">Not available: it needs at least two non-empty ' + what + '.</p>';
+    let h = '<h3>Cluster quality (silhouette)</h3><p>Average silhouette: <b>' + U.fmt(sil.mean, 3) + '</b> (' + silhouetteLabel(sil.mean) + ').</p>';
+    h += U.simpleTable(['Cluster', 'Records', 'Average silhouette'], names.map((nm, k) => [nm, sil.perCluster[k].n,
+      sil.perCluster[k].mean == null ? '' : { html: '<span class="sil-bar"><span style="width:' + (100 * Math.max(0, sil.perCluster[k].mean)).toFixed(1) + '%"></span></span> ' + U.esc(U.fmt(sil.perCluster[k].mean, 3)) }]));
+    h += '<p class="muted">For each record: silhouette = (b − a) ÷ max(a, b), where a is its average distance to the rest of its own cluster and b its average distance to the nearest other cluster. ' +
+      '+1 = well inside its cluster, 0 = on the border between two clusters, below 0 = probably in the wrong cluster. Above 0.5 is reasonable; below 0.25 means little real structure. Inputs are standardized.' +
+      (sil.sampled ? ' With this many records the values are estimated from a random sample of ' + sil.sampled + '.' : ' ' + sil.negative + ' record' + (sil.negative === 1 ? ' has' : 's have') + ' a negative silhouette.') + '</p>';
+    return h;
+  }
+
   /* single: true = one cluster; each record's distance from the centre is its anomaly score.
      p.anomalyPct = share of training records (the furthest ones) to flag as anomalies. */
   M.kmeans = function (rows, inputs, types, p) {
@@ -595,7 +649,8 @@
     if (X.length < (single ? 2 : K)) throw new Error('Need at least ' + (single ? 2 : K) + ' records for ' + (single ? 'single-cluster mode' : K + ' clusters') + '.');
     const { C, assign, iter } = kmeansFit(X, K, rand, +p.iterations || 50);
     const nearest = x => { let b = 0, bd = Infinity; C.forEach((c, k) => { const d = sqDist(x, c); if (d < bd) { bd = d; b = k; } }); return { k: b, d: Math.sqrt(bd) }; };
-    let cutoff = null, meanDist = 1, trainDist = null;
+    let cutoff = null, meanDist = 1, trainDist = null, sil = null;
+    if (!single) sil = silhouette(X, X.map(x => nearest(x).k), K, (+p.seed || 1) + 7919);
     if (single) {
       const pct = Math.min(50, Math.max(0.1, p.anomalyPct === '' || p.anomalyPct == null ? 5 : +p.anomalyPct || 5));
       trainDist = X.map(x => nearest(x).d);
@@ -603,6 +658,7 @@
       meanDist = U.mean(trainDist) || 1;
     }
     return {
+      silhouette: sil,   // per-record values (null when sampled), overall mean and per-cluster means
       predict(r) {
         const nb = nearest(enc.encode(r));
         const res = { pred: 'cluster-' + (nb.k + 1), conf: nb.d };
@@ -627,6 +683,7 @@
         h += U.simpleTable(['Input'].concat(C.map((_, k) => 'cluster-' + (k + 1))),
           [['Records'].concat(groups.map(g => g.length + ' (' + U.pct(g.length / rows.length) + ')'))].concat(inputs.map(name =>
             [name].concat(groups.map(g => types[name] === 'number' ? U.fmt(U.mean(U.nums(g, name))) : String(U.mode(g, name) == null ? '' : U.mode(g, name)))))));
+        h += silhouetteHtml(sil, C.map((_, k) => 'cluster-' + (k + 1)), 'clusters');
         return h;
       }
     };
@@ -675,6 +732,7 @@
     }
 
     const flaggedTrain = trainIdx.map(v => v > cutoff);
+    const sil = K > 1 ? silhouette(X, trainScores.map(s => s.k), K, (+p.seed || 1) + 7919) : null;
     return {
       predict(r) {
         const x = enc.encode(r), s = score(x), idx = indexOf(s), anomaly = idx > cutoff;
@@ -692,6 +750,7 @@
           const n = trainScores.filter(s => s.k === k).length, f = trainScores.filter((s, i) => s.k === k && flaggedTrain[i]).length;
           return ['peer-' + (k + 1), n, groupMean[k], f];
         }));
+        if (K > 1) h += silhouetteHtml(sil, C.map((_, k) => 'peer-' + (k + 1)), 'peer groups') + '<p class="muted">A high silhouette means the peer groups are distinct, so each record is compared with genuinely similar records.</p>';
         const reasons = new Map();
         X.forEach((x, i) => { if (flaggedTrain[i]) { const f = reasonOf(x, trainScores[i].k).field; reasons.set(f, (reasons.get(f) || 0) + 1); } });
         if (reasons.size) {

@@ -583,14 +583,18 @@
       const m = DM.models.kmeans(t.rows, inputs, types(t), p);
       let fields = U.setField(U.setField(t.fields, '$KM-K-Means', 'string'), '$KMD-K-Means', 'number');
       if (single) fields = U.setField(U.setField(fields, '$KMI-K-Means', 'number'), '$KMA-K-Means', 'string');
-      const rows = t.rows.map(r => {
+      const silValues = !single && m.silhouette ? m.silhouette.values : null;   // one per record (null when the data was too large to score every record)
+      if (silValues) fields = U.setField(fields, '$KMS-K-Means', 'number');
+      const rows = t.rows.map((r, i) => {
         const res = m.predict(r), o = Object.assign({}, r, { '$KM-K-Means': res.pred, '$KMD-K-Means': +res.conf.toFixed(4) });
         if (single) { o['$KMI-K-Means'] = +res.index.toFixed(4); o['$KMA-K-Means'] = res.anomaly ? 'anomaly' : 'normal'; }
+        if (silValues) o['$KMS-K-Means'] = +silValues[i].toFixed(4);
         return o;
       });
       const head = '<p class="model-head"><b>K-Means</b>' + (single ? ' (single cluster)' : '') + ' on ' + t.rows.length + ' records. Inputs: ' + inputs.map(U.esc).join(', ') +
         '.<br>Adds <code>$KM-K-Means</code> (cluster) and <code>$KMD-K-Means</code> (distance to cluster centre)' +
-        (single ? ', <code>$KMI-K-Means</code> (anomaly index: distance relative to the average) and <code>$KMA-K-Means</code> (<i>anomaly</i> or <i>normal</i>)' : '') + '.</p>';
+        (single ? ', <code>$KMI-K-Means</code> (anomaly index: distance relative to the average) and <code>$KMA-K-Means</code> (<i>anomaly</i> or <i>normal</i>)' : '') +
+        (silValues ? ' and <code>$KMS-K-Means</code> (silhouette: +1 well inside its cluster, below 0 probably misplaced)' : '') + '.</p>';
       return { data: table(t, fields, rows), model: { title: single ? 'K-Means (single cluster)' : 'K-Means (' + p.k + ' clusters)', html: head + m.summary() } };
     }
   };
