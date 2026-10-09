@@ -218,3 +218,6 @@ svg.spark { vertical-align: middle; }
   #palette-tabs { overflow-x: auto; }
   #palette-tabs button { white-space: nowrap; }
 }
+
+.sil-bar { display: inline-block; vertical-align: middle; width: 90px; height: 10px; background: #eef1f5; border-radius: 3px; overflow: hidden; }
+.sil-bar span { display: block; height: 100%; background: var(--c-modeling); }
