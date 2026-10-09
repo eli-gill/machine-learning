@@ -61,12 +61,12 @@
   };
 
   T.csv = {
-    cat: 'sources', label: 'CSV File', glyph: '≣', inputs: 0,
-    desc: 'Read a comma-separated file from your computer (it stays in your browser).',
+    cat: 'sources', label: 'CSV / Excel File', glyph: '≣', inputs: 0,
+    desc: 'Read a CSV or Excel (.xlsx) file from your computer (it stays in your browser). For a workbook with several sheets, pick the sheet to use.',
     params: [{ key: 'csv', label: 'File', type: 'csvfile', default: '' }, { key: 'fileName', type: 'hidden', default: '' }],
-    title: p => p.fileName || 'CSV File',
+    title: p => p.fileName || 'CSV / Excel File',
     exec(inp, p) {
-      if (!p.csv) throw new Error('Open the node and choose a CSV file (or paste CSV text).');
+      if (!p.csv) throw new Error('Open the node and choose a CSV or Excel file (or paste CSV text).');
       return { data: U.csvToTable(p.csv) };
     }
   };
@@ -706,12 +706,17 @@
   };
 
   T.export = {
-    cat: 'output', label: 'Export CSV', glyph: '⤓', inputs: 1, terminal: true,
-    desc: 'Download the data as a CSV file.',
-    params: [{ key: 'fileName', label: 'File name', type: 'text', default: 'export.csv' }],
+    cat: 'output', label: 'Export', glyph: '⤓', inputs: 1, terminal: true,
+    desc: 'Download the data as a CSV or Excel (.xlsx) file.',
+    params: [
+      { key: 'format', label: 'Format', type: 'select', default: 'csv', options: [{ v: 'csv', l: 'CSV (.csv)' }, { v: 'xlsx', l: 'Excel workbook (.xlsx)' }] },
+      { key: 'fileName', label: 'File name', type: 'text', default: 'export.csv' }
+    ],
     exec(inp, p) {
-      const name = (p.fileName || 'export.csv').replace(/[^\w.\- ]/g, '_');
-      return { output: { title: 'Export: ' + name, html: '<p>' + inp[0].rows.length + ' records ready.</p>', download: { name: /\.csv$/i.test(name) ? name : name + '.csv', text: U.toCSV(inp[0]) } } };
+      const xlsx = p.format === 'xlsx', ext = xlsx ? '.xlsx' : '.csv';
+      const base = (p.fileName || 'export').replace(/[^\w.\- ]/g, '_').replace(/\.(csv|xlsx)$/i, '') || 'export', name = base + ext;
+      const download = xlsx ? { name, data: DM.xlsx.write(inp[0]), mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } : { name, text: U.toCSV(inp[0]) };
+      return { output: { title: 'Export: ' + name, html: '<p>' + inp[0].rows.length + ' records ready.</p>', download } };
     }
   };
 

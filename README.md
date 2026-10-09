@@ -11,15 +11,16 @@ All data stays in the browser.
 
 | Palette tab | Nodes |
 |---|---|
-| **Sources** | Sample Data (built-in datasets), CSV File (upload or paste) |
+| **Sources** | Sample Data (built-in datasets), CSV / Excel File (upload a `.csv` or `.xlsx`, or paste CSV) |
 | **Record Ops** | Select, Sample, Sort, Distinct, **Merge** (inner / left / right / full join), Append, Aggregate |
 | **Field Ops** | Filter (drop/rename), Type (number ↔ text), Fill Missing, Clean Text, Derive (formula), Binning, **Partition** |
 | **Graphs** | Distribution (bar chart / histogram with optional overlay), Plot (scatter) |
 | **Modeling** | Decision Tree, Logistic Regression, Linear Regression, KNN, Naive Bayes, K-Means, **Apriori** (association rules) |
-| **Output** | Table, Data Audit, **Analysis** (accuracy, confusion matrix, MAE/RMSE/R² for Training vs Testing), Export CSV |
+| **Output** | Table, Data Audit, **Analysis** (accuracy, confusion matrix, MAE/RMSE/R² for Training vs Testing), Export (CSV or Excel `.xlsx`) |
 
 - Node shapes follow the SPSS Modeler convention: circle = source, hexagon = operation, triangle = graph, pentagon = model, square = output.
 - Modeling nodes train on the `1_Training` partition and add prediction fields to every record (`$R-Churn`, `$RC-Churn`, and so on), the way SPSS model nuggets do. Trained models are listed in the **Models** tab; results appear in the **Outputs** tab.
+- **Excel files**: the CSV / Excel File node opens `.xlsx` / `.xlsm` workbooks (pick the sheet if there is more than one; the first non-empty row is the header; dates become `YYYY-MM-DD` text; formulas use the value Excel last saved). The Export node can write `.xlsx` as well as CSV. Old `.xls` files must be re-saved as `.xlsx`. Reading needs a browser with `DecompressionStream` (current Chrome, Edge, Firefox, Safari).
 - Streams auto-save in the browser. **Save** / **Open…** download and load a `.json` file (useful for handing in work).
 - Apriori finds association rules ("if Bread & Diapers then Wipes") with support, confidence and lift. It accepts **transactional** data (a transaction ID field + an item field, one row per item) or **tabular** data (one row per transaction, with T/F flag fields or `Field = value` items).
 - Five example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification, house-price regression, K-Means clustering, and market-basket association rules.
@@ -36,7 +37,7 @@ All data stays in the browser.
 | Grocery baskets (flags) | 400 | Apriori, tabular format (one T/F field per product) |
 
 The telco, housing and basket data are synthetic, generated from a fixed seed so every student sees the same rows.
-Copies are in [`data/`](data/) for practising the CSV File node.
+Copies are in [`data/`](data/) for practising the CSV / Excel File node.
 
 ## Using it
 
@@ -64,6 +65,7 @@ The site will be live at `https://<user>.github.io/<repo>/` within a minute or t
 index.html        page layout + help text
 css/style.css     all styling
 js/util.js        CSV parsing, statistics, tables, SVG charts
+js/xlsx.js        Excel (.xlsx) reader and writer (zip + XML, no libraries)
 js/datasets.js    built-in sample data
 js/models.js      algorithms (CART tree, softmax logistic, least squares, KNN, Naive Bayes, K-Means, Apriori)
 js/nodes.js       node types: palette category, settings and exec()

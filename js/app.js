@@ -459,19 +459,43 @@
               try { const tb = U.csvToTable(params.csv); info.textContent = (params.fileName || 'Pasted data') + ': ' + tb.rows.length + ' records, ' + tb.fields.length + ' fields (' + tb.fields.map(f => f.name).join(', ') + ')'; }
               catch (e) { info.textContent = 'Could not read CSV: ' + e.message; }
             };
-            const file = document.createElement('input'); file.type = 'file'; file.accept = '.csv,.txt,.tsv,text/csv';
+            const file = document.createElement('input'); file.type = 'file'; file.accept = '.csv,.txt,.tsv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            const sheetBox = document.createElement('label'); sheetBox.className = 'check'; sheetBox.hidden = true;
+            const sheetSel = document.createElement('select'); sheetBox.append('Excel sheet: ', sheetSel);
+            let book = null, bookName = '';
+            const useCsv = (text, fileName) => {
+              if (text.length > 3e6) { alert('That sheet is larger than 3 MB of data. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
+              params.csv = text; params.fileName = fileName; ta.value = text.slice(0, 20000); ta.readOnly = text.length > 20000; describe();
+            };
+            const useSheet = () => {
+              const sh = book.sheets[+sheetSel.value];
+              useCsv(DM.xlsx.rowsToCSV(sh.rows), bookName + (book.sheets.length > 1 ? ' [' + sh.name + ']' : ''));
+            };
+            sheetSel.onchange = useSheet;
             file.onchange = () => {
               const f = file.files[0]; if (!f) return;
               if (f.size > 3e6) { alert('That file is larger than 3 MB. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
+              sheetBox.hidden = true; book = null;
+              if (/\.(xlsx|xlsm|xls)$/i.test(f.name)) {
+                info.textContent = 'Reading Excel file…';
+                f.arrayBuffer().then(buf => DM.xlsx.read(buf)).then(wb => {
+                  book = wb; bookName = f.name;
+                  sheetSel.innerHTML = '';
+                  wb.sheets.forEach((sh, i) => sheetSel.add(new Option(sh.name + ' (' + (sh.rows.length - 1) + ' rows)', i)));
+                  sheetBox.hidden = wb.sheets.length < 2;
+                  useSheet();
+                }).catch(e => { info.textContent = 'Could not read Excel file: ' + e.message; });
+                return;
+              }
               const rd = new FileReader();
-              rd.onload = () => { params.csv = rd.result; params.fileName = f.name; ta.value = params.csv.slice(0, 20000); describe(); };
+              rd.onload = () => useCsv(rd.result, f.name);
               rd.readAsText(f);
             };
             const ta = document.createElement('textarea'); ta.rows = 6; ta.spellcheck = false; ta.placeholder = '…or paste CSV text here (first row = field names)';
             ta.value = (params.csv || '').slice(0, 20000);
             if ((params.csv || '').length > 20000) ta.readOnly = true;
             ta.oninput = () => { params.csv = ta.value; params.fileName = ''; describe(); };
-            c.append(file, ta, info); describe();
+            c.append(file, sheetBox, ta, info); describe();
             break;
           }
         }
@@ -510,7 +534,7 @@
   }
   function showOutput(o) {
     const buttons = [];
-    if (o.download) buttons.push({ label: '⤓ Download ' + o.download.name, left: true, onClick: () => { U.download(o.download.name, o.download.text, 'text/csv'); return false; } });
+    if (o.download) buttons.push({ label: '⤓ Download ' + o.download.name, left: true, onClick: () => { U.download(o.download.name, o.download.data || o.download.text, o.download.mime || 'text/csv'); return false; } });
     buttons.push({ label: 'Close', primary: true });
     modal({ title: o.title, body: '<div class="output">' + o.html + '</div>', wide: true, buttons });
   }
