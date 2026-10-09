@@ -63,12 +63,12 @@
       </ul>
       <h3>The palette</h3>
       <dl>
-        <dt class="cat-sources">Sources</dt><dd>Sample Data (built-in practice data) and CSV File (your own data).</dd>
+        <dt class="cat-sources">Sources</dt><dd>Sample Data (built-in practice data) and CSV / Excel File (your own data: a .csv file, pasted text, or an .xlsx workbook, with a sheet picker).</dd>
         <dt class="cat-record">Record Ops</dt><dd>Work on rows: Select (filter rows), Sample, Sort, Distinct (remove duplicates), <b>Merge</b> (join two sources on a key), Append (stack sources), Aggregate (group &amp; summarise).</dd>
         <dt class="cat-field">Field Ops</dt><dd>Work on columns: Filter (drop/rename fields), Type (number vs text), Fill Missing, Clean Text, Derive (formula), Binning, and <b>Partition</b> (split into Training / Testing).</dd>
         <dt class="cat-graphs">Graphs</dt><dd>Distribution (bar chart / histogram) and Plot (scatter plot).</dd>
         <dt class="cat-modeling">Modeling</dt><dd>Decision Tree, <b>CHAID</b>, Logistic Regression, Linear Regression, KNN, Naive Bayes and K-Means. Pick a <b>target</b> field; the model trains on the Training partition and adds prediction fields (starting with <code>$</code>) to every record. <b>Apriori</b> needs no target: it finds association rules (items bought together). <b>Anomaly Detection</b> also needs no target: it flags unusual records, as does K-Means in <i>Single cluster</i> mode (distance from the centre).</dd>
-        <dt class="cat-output">Output</dt><dd>Table, Data Audit (quality report), <b>Analysis</b> (accuracy / error on Training vs Testing) and Export CSV.</dd>
+        <dt class="cat-output">Output</dt><dd>Table, Data Audit (quality report), <b>Analysis</b> (accuracy / error on Training vs Testing) and Export (CSV or Excel .xlsx).</dd>
       </dl>
       <h3>A typical workflow</h3>
       <ol>
@@ -83,6 +83,7 @@
   </template>
 
   <script src="js/util.js"></script>
+  <script src="js/xlsx.js"></script>
   <script src="js/datasets.js"></script>
   <script src="js/models.js"></script>
   <script src="js/nodes.js"></script>
