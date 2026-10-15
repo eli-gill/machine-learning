@@ -2,6 +2,8 @@
 (function (DM) {
   'use strict';
   const U = DM.util, T = DM.nodeTypes;
+  // Data is read into a JS string in the browser; V8 caps strings near 512 MB, so ~5 GB is not reachable.
+  const MAX_UPLOAD_BYTES = 100e6, MAX_UPLOAD_LABEL = '100 MB';
   const $ = (sel, el) => (el || document).querySelector(sel);
   const STORE_KEY = 'dms-stream-v1';
   const NODE_W = 96, SHAPE = 56;
@@ -464,7 +466,7 @@
             const sheetSel = document.createElement('select'); sheetBox.append('Excel sheet: ', sheetSel);
             let book = null, bookName = '';
             const useCsv = (text, fileName) => {
-              if (text.length > 3e6) { alert('That sheet is larger than 3 MB of data. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
+              if (text.length > MAX_UPLOAD_BYTES) { alert('That sheet is larger than ' + MAX_UPLOAD_LABEL + ' of data. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
               params.csv = text; params.fileName = fileName; ta.value = text.slice(0, 20000); ta.readOnly = text.length > 20000; describe();
             };
             const useSheet = () => {
@@ -474,7 +476,7 @@
             sheetSel.onchange = useSheet;
             file.onchange = () => {
               const f = file.files[0]; if (!f) return;
-              if (f.size > 3e6) { alert('That file is larger than 3 MB. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
+              if (f.size > MAX_UPLOAD_BYTES) { alert('That file is larger than ' + MAX_UPLOAD_LABEL + '. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
               sheetBox.hidden = true; book = null;
               if (/\.(xlsx|xlsm|xls)$/i.test(f.name)) {
                 info.textContent = 'Reading Excel file…';
