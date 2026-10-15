@@ -11,7 +11,7 @@ All data stays in the browser.
 
 | Palette tab | Nodes |
 |---|---|
-| **Sources** | Sample Data (built-in datasets), CSV / Excel File (upload a `.csv` or `.xlsx`, or paste CSV) |
+| **Sources** | Sample Data (built-in datasets), CSV / Excel File (upload a `.csv` or `.xlsx`, or paste CSV; multi-GB CSVs can be streamed and reduced to a sample or selected columns) |
 | **Record Ops** | Select, Sample, Sort, Distinct, **Merge** (inner / left / right / full join), Append, Aggregate |
 | **Field Ops** | Filter (drop/rename), Type (number ↔ text), Fill Missing, Clean Text, Derive (formula), Binning, **Partition** |
 | **Graphs** | Distribution (bar chart / histogram with optional overlay), Plot (scatter) |

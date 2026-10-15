@@ -4,6 +4,7 @@
   const U = DM.util, T = DM.nodeTypes;
   // Data is read into a JS string in the browser; V8 caps strings near 512 MB, so ~5 GB is not reachable.
   const MAX_UPLOAD_BYTES = 100e6, MAX_UPLOAD_LABEL = '100 MB';
+  // Files above this are never loaded whole; the "Large CSV" section streams and reduces them instead.
   const $ = (sel, el) => (el || document).querySelector(sel);
   const STORE_KEY = 'dms-stream-v1';
   const NODE_W = 96, SHAPE = 56;
@@ -476,7 +477,7 @@
             sheetSel.onchange = useSheet;
             file.onchange = () => {
               const f = file.files[0]; if (!f) return;
-              if (f.size > MAX_UPLOAD_BYTES) { alert('That file is larger than ' + MAX_UPLOAD_LABEL + '. Please use a smaller sample (this tool runs entirely in your browser).'); return; }
+              if (f.size > MAX_UPLOAD_BYTES) { alert('That file is larger than ' + MAX_UPLOAD_LABEL + '. Use the "Large CSV file" option below to stream it and keep a sample or selected columns.'); return; }
               sheetBox.hidden = true; book = null;
               if (/\.(xlsx|xlsm|xls)$/i.test(f.name)) {
                 info.textContent = 'Reading Excel file…';
@@ -497,7 +498,32 @@
             ta.value = (params.csv || '').slice(0, 20000);
             if ((params.csv || '').length > 20000) ta.readOnly = true;
             ta.oninput = () => { params.csv = ta.value; params.fileName = ''; describe(); };
-            c.append(file, sheetBox, ta, info); describe();
+            // Streaming loader for very large CSVs (multi-GB): reads in chunks, keeps only a sample / selected columns.
+            const big = document.createElement('details'); big.className = 'bigcsv';
+            big.innerHTML = '<summary>Large CSV file (streamed, multi-GB)</summary>' +
+              '<div class="help">Reads the file in chunks so it never has to fit in memory, and keeps only what you choose below. Leave rows at 0 to keep every row (the result must stay under ' + MAX_UPLOAD_LABEL + ').</div>';
+            const bigRows = document.createElement('input'); bigRows.type = 'number'; bigRows.min = 0; bigRows.value = 100000;
+            const bigMode = document.createElement('select'); bigMode.add(new Option('Random sample of N rows', 'sample')); bigMode.add(new Option('First N rows', 'first'));
+            const bigCols = document.createElement('input'); bigCols.placeholder = 'Columns to keep, comma-separated (blank = all)';
+            const bigFile = document.createElement('input'); bigFile.type = 'file'; bigFile.accept = '.csv,.txt,.tsv,text/csv';
+            const bigInfo = document.createElement('div'); bigInfo.className = 'info';
+            bigFile.onchange = async () => {
+              const f = bigFile.files[0]; if (!f) return;
+              bigFile.disabled = true;
+              try {
+                const res = await U.streamCSV(f, {
+                  maxRows: +bigRows.value || 0, mode: bigMode.value,
+                  columns: bigCols.value.split(',').map(x => x.trim()).filter(Boolean),
+                  onProgress: (fr, n) => { bigInfo.textContent = 'Reading ' + f.name + ': ' + Math.round(fr * 100) + '% (' + n.toLocaleString() + ' rows scanned)…'; }
+                });
+                bigInfo.textContent = '';
+                useCsv(res.text, f.name + (res.kept < res.total || res.truncated ? ' [' + res.kept.toLocaleString() + (res.truncated ? ' first rows' : ' of ' + res.total.toLocaleString() + ' rows') + ']' : ''));
+              } catch (e) { bigInfo.textContent = 'Could not read file: ' + e.message; }
+              bigFile.disabled = false; bigFile.value = '';
+            };
+            const lab = (t, el) => { const l = document.createElement('label'); l.append(t, el); return l; };
+            big.append(lab('Rows to keep (0 = all): ', bigRows), lab('Method: ', bigMode), bigCols, bigFile, bigInfo);
+            c.append(file, sheetBox, big, ta, info); describe();
             break;
           }
         }

@@ -55,6 +55,79 @@ window.DM = window.DM || {};
     return rows.filter(r => !(r.length === 1 && r[0].trim() === ''));
   };
 
+  // Stream a File through a CSV parser without holding it in memory.
+  // opts: { columns: [names] (empty = all), maxRows: keep at most N data rows (0 = all),
+  //         mode: 'first' | 'sample' (uniform random sample of maxRows), seed, onProgress(fraction, rowsSeen) }
+  // Resolves to { text (reduced CSV), total (data rows seen), kept, header }.
+  U.streamCSV = async function (file, opts) {
+    opts = opts || {};
+    const maxRows = opts.maxRows > 0 ? Math.floor(opts.maxRows) : 0;
+    const sample = opts.mode === 'sample' && maxRows > 0;
+    const rand = U.rng ? U.rng(opts.seed || 1) : Math.random;
+    const dec = new TextDecoder('utf-8');
+    const reader = file.stream().getReader();
+    let delim = null, header = null, idx = null, total = 0, done = false;
+    const kept = [];
+    let row = [], field = '', q = false, pendQuote = false, pendCR = false, first = true, bytes = 0, lastYield = 0;
+    const endRow = () => {
+      row.push(field); field = '';
+      const r = row; row = [];
+      if (r.length === 1 && r[0].trim() === '') return;
+      if (!header) {
+        header = r.map(h => h.trim());
+        const want = (opts.columns || []).filter(Boolean);
+        if (want.length) {
+          idx = want.map(w => header.indexOf(w));
+          const bad = want.filter((w, i) => idx[i] < 0);
+          if (bad.length) throw new Error('Column not found: ' + bad.join(', '));
+        }
+        return;
+      }
+      total++;
+      const out = idx ? idx.map(i => r[i] === undefined ? '' : r[i]) : r;
+      if (!maxRows || kept.length < maxRows) kept.push(out);
+      else if (sample) { const j = Math.floor(rand() * total); if (j < maxRows) kept[j] = out; }
+      else done = true;
+    };
+    const feed = text => {
+      if (first) {
+        text = text.replace(/^\uFEFF/, '');
+        const line = text.split(/\r?\n/, 1)[0] || '';
+        delim = [',', ';', '\t', '|'].map(d => [d, line.split(d).length]).sort((a, b) => b[1] - a[1])[0][0];
+        first = false;
+      }
+      for (let i = 0; i < text.length && !done; i++) {
+        const c = text[i];
+        if (pendCR) { pendCR = false; if (c === '\n') continue; }
+        if (pendQuote) { pendQuote = false; if (c === '"') { field += '"'; continue; } q = false; }
+        if (q) { if (c === '"') pendQuote = true; else field += c; }
+        else if (c === '"') q = true;
+        else if (c === delim) { row.push(field); field = ''; }
+        else if (c === '\n') endRow();
+        else if (c === '\r') { endRow(); pendCR = true; }
+        else field += c;
+      }
+    };
+    while (!done) {
+      const { value, done: eof } = await reader.read();
+      if (eof) { feed(dec.decode()); break; }
+      bytes += value.length;
+      feed(dec.decode(value, { stream: true }));
+      if (opts.onProgress && Date.now() - lastYield > 100) {
+        lastYield = Date.now();
+        opts.onProgress(bytes / (file.size || 1), total);
+      }
+    }
+    if (done) reader.cancel();
+    if (!done && (field !== '' || row.length)) { pendQuote = false; endRow(); }
+    if (!header) throw new Error('The CSV file is empty.');
+    const q2 = v => { const s = String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const hdr = idx ? idx.map(i => header[i]) : header;
+    const lines = [hdr.map(q2).join(',')];
+    kept.forEach(r => lines.push(r.map(q2).join(',')));
+    return { text: lines.join('\n'), total, kept: kept.length, header, truncated: done };
+  };
+
   const isNumStr = v => { const s = String(v).trim(); return s !== '' && isFinite(Number(s)); };
 
   // Build a table from a header row and data rows, inferring number vs string storage.
