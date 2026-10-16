@@ -634,7 +634,7 @@
   const TRUE_FLAG = /^(t|true|y|yes|1)$/i;
   T.apriori = {
     cat: 'modeling', label: 'Apriori', glyph: '⇶', inputs: 1, model: true,
-    desc: 'Association rules (market basket analysis): finds items that tend to occur together, e.g. "if Bread then Butter".',
+    desc: 'Association rules (market basket analysis): finds items that tend to occur together, e.g. "if Bread then Butter". The output is a table of rules (flagged as rules), one row per rule.',
     params: [
       { key: 'format', label: 'Data format', type: 'select', default: 'transactional', options: [
         { v: 'transactional', l: 'Transactional: one row per item (an ID field + an item field)' },
@@ -682,7 +682,11 @@
       const m = DM.models.apriori(tx, p);
       const head = '<p class="model-head"><b>Apriori</b> on ' + tx.length + ' transactions (' + (p.format === 'tabular' ? 'tabular' : 'transactional') + ' data). ' +
         'Min support ' + (+p.minSupport) + '%, min confidence ' + (+p.minConfidence) + '%, up to ' + (+p.maxAntecedents) + ' antecedent item(s).</p>';
-      return { data: t, model: { title: (ctx.name || 'Apriori') + ': ' + m.rules.length + ' rules', html: head + m.summary() } };
+      // Output the rules themselves as a table, flagged as rules so downstream output nodes can label it.
+      const fields = [['Antecedent', 'string'], ['Consequent', 'string'], ['Antecedent support', 'number'], ['Rule support', 'number'], ['Confidence', 'number'], ['Lift', 'number'], ['Transactions', 'number']]
+        .map(f => ({ name: f[0], type: f[1] }));
+      const rows = m.rules.map(r => ({ 'Antecedent': r.ante.join(' & '), 'Consequent': r.cons, 'Antecedent support': r.anteSup, 'Rule support': r.support, 'Confidence': r.conf, 'Lift': r.lift, 'Transactions': r.count }));
+      return { data: { fields, rows, meta: { kind: 'rules' } }, model: { title: (ctx.name || 'Apriori') + ': ' + m.rules.length + ' rules', html: head + m.summary() } };
     }
   };
 
@@ -691,7 +695,7 @@
     cat: 'output', label: 'Table', glyph: '▤', inputs: 1, terminal: true,
     desc: 'Show the data as a table.',
     params: [{ key: 'maxRows', label: 'Maximum rows to show', type: 'number', default: 500 }],
-    exec(inp, p, ctx) { return { output: { title: 'Table (' + ctx.inputNames[0] + ')', html: U.htmlTable(inp[0], +p.maxRows || 500) } }; }
+    exec(inp, p, ctx) { return { output: { title: (U.isRules(inp[0]) ? 'Rules (' : 'Table (') + ctx.inputNames[0] + ')', html: U.htmlTable(inp[0], +p.maxRows || 500) } }; }
   };
 
   T.audit = {

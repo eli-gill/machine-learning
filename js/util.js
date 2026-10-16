@@ -263,9 +263,13 @@ window.DM = window.DM || {};
   };
   U.pct = v => (100 * v).toFixed(1) + '%';
 
+  // True for tables produced by Apriori (and still holding the rule fields).
+  U.isRules = t => !!(t && t.meta && t.meta.kind === 'rules' && U.field(t, 'Antecedent') && U.field(t, 'Consequent'));
+
   U.htmlTable = function (table, maxRows) {
     const n = table.rows.length, show = Math.min(n, maxRows || 500);
-    let h = '<div class="grid-wrap"><table class="grid"><thead><tr><th class="rownum">#</th>';
+    let h = U.isRules(table) ? '<p><span class="badge-rules">RULES</span> <span class="muted">Association rules: read each row as “if Antecedent then Consequent”.</span></p>' : '';
+    h += '<div class="grid-wrap"><table class="grid"><thead><tr><th class="rownum">#</th>';
     table.fields.forEach(f => {
       h += '<th title="' + (f.type === 'number' ? 'Numeric' : 'String') + '"><span class="ftype ' + f.type + '">' +
         (f.type === 'number' ? '#' : 'A') + '</span>' + U.esc(f.name) + '</th>';
