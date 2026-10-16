@@ -62,7 +62,7 @@
 
   T.csv = {
     cat: 'sources', label: 'CSV / Excel File', glyph: '≣', inputs: 0,
-    desc: 'Read a CSV or Excel (.xlsx) file from your computer (it stays in your browser). For a workbook with several sheets, pick the sheet to use.',
+    desc: 'Read a CSV or Excel (.xlsx) file from your computer (it stays in your browser). Files of many GB can be streamed with the "Large CSV file" option, keeping a sample or chosen columns. For a workbook with several sheets, pick the sheet to use.',
     params: [{ key: 'csv', label: 'File', type: 'csvfile', default: '' }, { key: 'fileName', type: 'hidden', default: '' }],
     title: p => p.fileName || 'CSV / Excel File',
     exec(inp, p) {
