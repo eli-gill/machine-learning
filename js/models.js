@@ -372,6 +372,76 @@
     };
   };
 
+  /* ---------- Artificial neural network (one tanh hidden layer + softmax) ---------- */
+  M.ann = function (rows, inputs, types, target, kind, p) {
+    const classes = classList(rows, target), K = classes.length;
+    if (K < 2) throw new Error('The target needs at least two different values in the training data.');
+    function setting(key, fallback, min, max, integer) {
+      const v = p[key] === undefined ? fallback : Number(p[key]);
+      if (!Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) {
+        throw new Error('ANN ' + key + ' must be ' + (integer ? 'an integer ' : '') + 'between ' + min + ' and ' + max + '.');
+      }
+      return v;
+    }
+    const H = setting('hiddenUnits', 8, 1, 128, true);
+    const epochs = setting('iterations', 500, 1, 10000, true);
+    const lr = setting('learningRate', 0.1, 0.000001, 1, false);
+    const l2 = setting('l2', 0.001, 0, 10, false);
+    const rand = U.rng(setting('seed', 42, 0, 4294967295, true));
+    const enc = M.encoder(rows, inputs, types), D = enc.dim, n = rows.length;
+    const ci = new Map(classes.map((c, i) => [c.key, i]));
+    const X = rows.map(r => enc.encode(r)), y = rows.map(r => ci.get(String(r[target])));
+    const weights = (a, b) => Array.from({ length: a }, () => Array.from({ length: b }, () => (rand() * 2 - 1) * Math.sqrt(6 / (a + b))));
+    const W = weights(H, D), V = weights(K, H), b = new Array(H).fill(0), c = new Array(K).fill(0);
+    function forward(x) {
+      const h = W.map((w, j) => Math.tanh(w.reduce((s, v, d) => s + v * x[d], b[j])));
+      const z = V.map((v, k) => v.reduce((s, w, j) => s + w * h[j], c[k]));
+      const mx = Math.max(...z), e = z.map(v => Math.exp(v - mx)), total = e.reduce((s, v) => s + v, 0);
+      return { h, pr: e.map(v => v / total) };
+    }
+    // Full-batch backpropagation. Encoding and gradients use Training rows only.
+    for (let it = 0; it < epochs; it++) {
+      const gW = W.map(w => w.map(() => 0)), gV = V.map(v => v.map(() => 0));
+      const gb = b.map(() => 0), gc = c.map(() => 0);
+      X.forEach((x, i) => {
+        const { h, pr } = forward(x), delta = pr.map((v, k) => v - (y[i] === k ? 1 : 0));
+        for (let j = 0; j < H; j++) {
+          const dh = delta.reduce((s, v, k) => s + v * V[k][j], 0) * (1 - h[j] * h[j]);
+          gb[j] += dh;
+          for (let d = 0; d < D; d++) gW[j][d] += dh * x[d];
+        }
+        for (let k = 0; k < K; k++) {
+          gc[k] += delta[k];
+          for (let j = 0; j < H; j++) gV[k][j] += delta[k] * h[j];
+        }
+      });
+      for (let j = 0; j < H; j++) {
+        b[j] -= lr * gb[j] / n;
+        for (let d = 0; d < D; d++) W[j][d] -= lr * (gW[j][d] / n + l2 * W[j][d]);
+      }
+      for (let k = 0; k < K; k++) {
+        c[k] -= lr * gc[k] / n;
+        for (let j = 0; j < H; j++) V[k][j] -= lr * (gV[k][j] / n + l2 * V[k][j]);
+      }
+    }
+    const loss = -X.reduce((s, x, i) => s + Math.log(Math.max(1e-15, forward(x).pr[y[i]])), 0) / n;
+    if (!Number.isFinite(loss)) throw new Error('ANN training diverged. Try a smaller learning rate.');
+    return {
+      predict(r) {
+        const { pr } = forward(enc.encode(r));
+        let best = 0;
+        pr.forEach((v, k) => { if (v > pr[best]) best = k; });
+        return { pred: classes[best].value, conf: pr[best] };
+      },
+      summary() {
+        return '<h3>Network architecture</h3><p>' + D + ' encoded inputs → ' + H + ' tanh hidden units → ' + K + ' softmax class outputs.</p>' +
+          '<p>Full-batch backpropagation: ' + epochs + ' iterations; training cross-entropy = ' + U.fmt(loss) + '.</p>' +
+          '<p class="muted">Numeric inputs are standardized and missing numbers use the Training mean; categories are one-hot encoded. Initialization is seeded. Confidence is a softmax score, not a calibrated probability.</p>' +
+          '<p>To explore this black box, train a shallow Decision Tree on the ANN prediction field using only the original inputs. Its rules approximate the ANN, not its internal weights or causal reasoning. Check agreement on Testing records as well as ANN accuracy against the true target.</p>';
+      }
+    };
+  };
+
   /* ---------- Logistic regression (softmax, gradient descent) ---------- */
   M.logistic = function (rows, inputs, types, target, kind, p) {
     const classes = classList(rows, target), K = classes.length;

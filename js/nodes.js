@@ -542,6 +542,15 @@
   T.tree = modelNode({ label: 'Decision Tree', glyph: '⋔', algo: 'tree', prefix: 'R', kinds: ['categorical', 'continuous'],
     desc: 'C&R-style tree: repeatedly splits the data on the input that best separates the target.',
     params: [{ key: 'maxDepth', label: 'Maximum depth', type: 'number', default: 4 }, { key: 'minLeaf', label: 'Minimum records per leaf', type: 'number', default: 5 }] });
+  T.ann = modelNode({ label: 'Artificial Neural Network', glyph: '⚯', algo: 'ann', prefix: 'ANN', kinds: ['categorical'],
+    desc: 'Classification network with one tanh hidden layer and softmax outputs. Use a shallow tree trained on its predictions as an approximate explanation.',
+    params: [
+      { key: 'hiddenUnits', label: 'Hidden units (1–128)', type: 'number', default: 8 },
+      { key: 'iterations', label: 'Training iterations (1–10000)', type: 'number', default: 500 },
+      { key: 'learningRate', label: 'Learning rate (0–1, exclusive of 0)', type: 'number', default: 0.1 },
+      { key: 'l2', label: 'Regularisation (L2)', type: 'number', default: 0.001 },
+      { key: 'seed', label: 'Random seed', type: 'number', default: 42 }
+    ] });
   T.logistic = modelNode({ label: 'Logistic Regression', glyph: '∫', algo: 'logistic', prefix: 'L', kinds: ['categorical'],
     desc: 'Predicts a categorical target from a weighted sum of the inputs.',
     params: [{ key: 'iterations', label: 'Training iterations', type: 'number', default: 300 }, { key: 'learningRate', label: 'Learning rate', type: 'number', default: 0.3 }, { key: 'l2', label: 'Regularisation (L2)', type: 'number', default: 0.001 }] });
