@@ -372,6 +372,63 @@
     };
   };
 
+  /* ---------- Linear support vector machine (one-vs-rest, hinge loss) ---------- */
+  M.svm = function (rows, inputs, types, target, kind, p) {
+    const classes = classList(rows, target), K = classes.length;
+    if (K < 2) throw new Error('The target needs at least two different values in the training data.');
+    function setting(key, fallback, min, max, integer) {
+      const v = p[key] === undefined ? fallback : Number(p[key]);
+      if (!Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) {
+        throw new Error('SVM ' + key + ' must be ' + (integer ? 'an integer ' : '') + 'between ' + min + ' and ' + max + '.');
+      }
+      return v;
+    }
+    const C = setting('cost', 1, 0.000001, 100, false);
+    const iterations = setting('iterations', 1000, 1, 10000, true);
+    const learningRate = setting('learningRate', 0.1, 0.000001, 1, false);
+    const enc = M.encoder(rows, inputs, types), D = enc.dim, n = rows.length;
+    const X = rows.map(r => enc.encode(r));
+    const W = classes.map(() => new Array(D).fill(0)), bias = classes.map(() => 0);
+    const dot = (w, x) => w.reduce((s, v, j) => s + v * x[j], 0);
+    // Minimize 1/2 ||w||² + C * mean(max(0, 1 - y * score)) for each class.
+    // Bias is not regularized; all preprocessing and fitting use Training rows only.
+    classes.forEach((cls, k) => {
+      const y = rows.map(r => String(r[target]) === cls.key ? 1 : -1), w = W[k];
+      for (let it = 0; it < iterations; it++) {
+        const gradient = w.slice();
+        let gb = 0;
+        X.forEach((x, i) => {
+          if (y[i] * (dot(w, x) + bias[k]) >= 1) return;
+          const g = C * y[i] / n;
+          for (let j = 0; j < D; j++) gradient[j] -= g * x[j];
+          gb -= g;
+        });
+        const rate = learningRate / (1 + it * 0.01);
+        for (let j = 0; j < D; j++) w[j] -= rate * gradient[j];
+        bias[k] -= rate * gb;
+      }
+    });
+    if (W.some(w => w.some(v => !Number.isFinite(v))) || bias.some(v => !Number.isFinite(v))) {
+      throw new Error('SVM training diverged. Try a smaller learning rate or cost.');
+    }
+    const scores = r => { const x = enc.encode(r); return W.map((w, k) => dot(w, x) + bias[k]); };
+    return {
+      predict(r) {
+        const s = scores(r), mx = Math.max(...s), e = s.map(v => Math.exp(v - mx));
+        let best = 0;
+        s.forEach((v, k) => { if (v > s[best]) best = k; });
+        return { pred: classes[best].value, conf: e[best] / e.reduce((a, b) => a + b, 0) };
+      },
+      summary() {
+        return '<h3>Linear SVM: one-vs-rest</h3><p>Fits one separating hyperplane per class using L2 regularization and hinge loss. Cost C = ' + U.fmt(C) +
+          '; ' + iterations + ' full-batch subgradient iterations with a decaying learning rate. Larger C penalizes margin violations more strongly.</p>' +
+          '<p class="muted">Numeric inputs are standardized; missing numbers use the Training mean. Categories are one-hot encoded (unseen categories use all-zero indicators). No nonlinear kernel is used. Confidence is a softmax of decision scores, not a calibrated probability.</p>' +
+          '<h3>Weights by class</h3><p>Positive weights raise that class’s decision score; the largest score wins. Numeric weights are in standardized units, not original units.</p>' +
+          U.simpleTable(['Encoded input'].concat(classes.map(c => c.key)), enc.names.map((name, j) => [name].concat(W.map(w => w[j]))).concat([['(Intercept)'].concat(bias)]));
+      }
+    };
+  };
+
   /* ---------- Artificial neural network (one tanh hidden layer + softmax) ---------- */
   M.ann = function (rows, inputs, types, target, kind, p) {
     const classes = classList(rows, target), K = classes.length;

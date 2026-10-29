@@ -54,6 +54,17 @@
       ], [['n1', 'n2'], ['n2', 'n3'], ['n3', 'n4'], ['n3', 'n5'], ['n5', 'n6'], ['n5', 'n7']])
     },
     {
+      label: 'Iris: support vector machine classification',
+      build: () => stream([
+        ['n1', 'sample_data', 40, 150, { dataset: 'iris' }],
+        ['n2', 'partition', 210, 150, { train: 70, seed: 42 }],
+        ['n3', 'svm', 390, 150, { target: 'Species', inputs: ['Sepal_Length', 'Sepal_Width', 'Petal_Length', 'Petal_Width'], cost: 50 }, 'Linear SVM'],
+        ['n4', 'analysis', 590, 40, {}, 'SVM accuracy'],
+        ['n5', 'table', 590, 180, {}, 'SVM predictions and scores'],
+        ['n6', 'plot', 590, 320, { x: 'Petal_Length', y: 'Petal_Width', color: '$SVM-Species' }, 'SVM predicted species']
+      ], [['n1', 'n2'], ['n2', 'n3'], ['n3', 'n4'], ['n3', 'n5'], ['n3', 'n6']])
+    },
+    {
       label: 'House prices: regression',
       build: () => stream([
         ['n1', 'sample_data', 40, 150, { dataset: 'housing' }],
