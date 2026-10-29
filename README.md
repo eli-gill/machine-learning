@@ -15,7 +15,7 @@ All data stays in the browser.
 | **Record Ops** | Select, Sample, Sort, Distinct, **Merge** (inner / left / right / full join), Append, Aggregate |
 | **Field Ops** | Filter (drop/rename), Type (number ↔ text), Fill Missing, Clean Text, Derive (formula), Binning, **Partition** |
 | **Graphs** | Distribution (bar chart / histogram with optional overlay), Plot (scatter) |
-| **Modeling** | Decision Tree, **CHAID**, **Artificial Neural Network (ANN)**, Logistic Regression, Linear Regression, KNN, Naive Bayes, K-Means (several clusters or **single-cluster** anomaly scoring), **Anomaly Detection**, **Apriori** (association rules) |
+| **Modeling** | Decision Tree, **CHAID**, **Artificial Neural Network (ANN)**, **Support Vector Machine (SVM)**, Logistic Regression, Linear Regression, KNN, Naive Bayes, K-Means (several clusters or **single-cluster** anomaly scoring), **Anomaly Detection**, **Apriori** (association rules) |
 | **Output** | Table, Data Audit, **Analysis** (accuracy, confusion matrix, MAE/RMSE/R² for Training vs Testing), Export (CSV or Excel `.xlsx`) |
 
 - Node shapes follow the SPSS Modeler convention: circle = source, hexagon = operation, triangle = graph, pentagon = model, square = output.
@@ -27,7 +27,27 @@ All data stays in the browser.
 - **K-Means** has a *Single cluster* mode: every record goes into one cluster and its distance from the centre is its anomaly score. It adds `$KMD-` (distance), `$KMI-` (anomaly index = distance ÷ average distance) and `$KMA-` (*anomaly* / *normal*, flagging the furthest N% of records).
 - **Silhouette**: K-Means (several clusters) and Anomaly Detection (peer groups) report cluster quality as the average silhouette overall and per cluster, from -1 (probably misplaced) through 0 (on the border) to +1 (well inside its cluster). K-Means also adds a per-record `$KMS-` field, so you can plot or filter the weakly clustered records; with more than 2,000 records the summary is estimated from a random sample of 1,000 and the per-record field is left out.
 - **Anomaly Detection** is a separate model that needs no target. It groups the Training records into peer groups with k-means, scores each record against its own group (`$OA-` anomaly index, `$OP-` peer group), flags unusual ones (`$O-`, by top % or by index cutoff) and names the field contributing most (`$OR-`).
-- Seven example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification (including CHAID), ANN explanation with a surrogate tree, house-price regression, K-Means clustering, Iris anomaly detection, and market-basket association rules.
+- Eight example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification (including CHAID), ANN explanation with a surrogate tree, SVM classification, house-price regression, K-Means clustering, Iris anomaly detection, and market-basket association rules.
+
+### Support Vector Machine
+
+Choose **Examples… → Iris: support vector machine classification**, then **Run**.
+The **Support Vector Machine** node is a linear, categorical classifier (including
+numeric class labels), using one-vs-rest hinge loss and L2 regularization. It adds
+`$SVM-<target>` predictions and `$SVMC-<target>` confidence scores. Confidence is a
+softmax of decision scores, **not a calibrated probability**.
+
+Settings control the cost **C**, training iterations, and initial learning rate.
+The objective for each class is `0.5 * ||w||² + C * mean(hinge loss)`; larger C
+penalizes margin violations more strongly. Training uses deterministic full-batch
+subgradient descent with a decaying learning rate. This is a linear SVM, not a
+nonlinear/kernel SVM or support vector regression.
+
+Numeric inputs are standardized and missing numbers use the Training mean;
+categorical inputs are one-hot encoded, with unseen categories represented by zeros.
+Only Training records determine preprocessing and weights. In **Models**, inspect
+weights by class; in **Analysis**, compare Training and Testing accuracy and confusion
+matrices. As with other models, use a Partition node to obtain held-out evaluation.
 
 ### Exploring an ANN's “black box”
 
@@ -102,7 +122,7 @@ css/style.css     all styling
 js/util.js        CSV parsing, statistics, tables, SVG charts
 js/xlsx.js        Excel (.xlsx) reader and writer (zip + XML, no libraries)
 js/datasets.js    built-in sample data
-js/models.js      algorithms (CART tree, CHAID, ANN, softmax logistic, least squares, KNN, Naive Bayes, K-Means, anomaly detection, Apriori)
+js/models.js      algorithms (CART tree, CHAID, ANN, linear SVM, softmax logistic, least squares, KNN, Naive Bayes, K-Means, anomaly detection, Apriori)
 js/nodes.js       node types: palette category, settings and exec()
 js/examples.js    example streams
 js/app.js         canvas editor, settings dialogs, execution engine, outputs/models panel
