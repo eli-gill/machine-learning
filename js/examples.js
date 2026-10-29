@@ -42,6 +42,18 @@
       ], [['n1', 'n2'], ['n1', 'n3'], ['n3', 'n4'], ['n3', 'n5'], ['n4', 'n6'], ['n5', 'n7'], ['n5', 'n8'], ['n3', 'n9'], ['n9', 'n10']])
     },
     {
+      label: 'Iris: explain an ANN with a surrogate tree',
+      build: () => stream([
+        ['n1', 'sample_data', 40, 150, { dataset: 'iris' }],
+        ['n2', 'partition', 200, 150, { train: 70, seed: 42 }],
+        ['n3', 'ann', 370, 150, { target: 'Species', inputs: ['Sepal_Length', 'Sepal_Width', 'Petal_Length', 'Petal_Width'], seed: 42 }, 'ANN teacher'],
+        ['n4', 'analysis', 550, 20, {}, 'ANN accuracy vs true species'],
+        ['n5', 'tree', 550, 230, { target: '$ANN-Species', targetKind: 'categorical', inputs: ['Sepal_Length', 'Sepal_Width', 'Petal_Length', 'Petal_Width'], maxDepth: 3, minLeaf: 5 }, 'Surrogate: approximate ANN rules'],
+        ['n6', 'analysis', 760, 150, {}, 'Tree agreement with ANN (not truth)'],
+        ['n7', 'table', 760, 310, {}, 'Compare species, ANN and tree']
+      ], [['n1', 'n2'], ['n2', 'n3'], ['n3', 'n4'], ['n3', 'n5'], ['n5', 'n6'], ['n5', 'n7']])
+    },
+    {
       label: 'House prices: regression',
       build: () => stream([
         ['n1', 'sample_data', 40, 150, { dataset: 'housing' }],
