@@ -504,6 +504,47 @@
   }
   function types(t) { const o = {}; t.fields.forEach(f => { o[f.name] = f.type; }); return o; }
 
+  // A saved recipe contains data, never executable code. Rehydration fits once on
+  // the frozen training snapshot; subsequent scoring reuses the fitted closure.
+  const restoredModels = new WeakMap();
+  function trainedResult(result, type, t, p, required, score) {
+    const modelMeta = result.data.meta && result.data.meta.models;
+    const contextName = modelMeta && modelMeta.length ? modelMeta[modelMeta.length - 1].name : '';
+    const recipe = JSON.parse(JSON.stringify({ version: 1, type, training: t, params: p, contextName }));
+    const fitted = {
+      recipe,
+      score(data) {
+        required.forEach(name => {
+          const field = U.field(data, name), expected = U.field(t, name);
+          if (!field) throw new Error('Scoring data is missing input field "' + name + '".');
+          if (expected && field.type !== expected.type) throw new Error('Scoring input "' + name + '" must have type ' + expected.type + '.');
+        });
+        return score(data);
+      }
+    };
+    result.fitted = fitted;
+    result.model.fitted = fitted;
+    return result;
+  }
+  T.trained_model = {
+    cat: 'modeling', label: 'Trained Model', glyph: '◆', inputs: 1,
+    desc: 'Apply a frozen model to new data without training on it. Create this node from a model’s context menu or Models tab.',
+    params: [],
+    exec(inp, p) {
+      const recipe = p.recipe;
+      if (!recipe || recipe.version !== 1 || !T[recipe.type] || !T[recipe.type].model || recipe.type === 'trained_model') {
+        throw new Error('Create a trained model node from a fitted model first.');
+      }
+      let fitted = restoredModels.get(recipe);
+      if (!fitted) {
+        fitted = T[recipe.type].exec([recipe.training], recipe.params, { name: recipe.contextName }).fitted;
+        restoredModels.set(recipe, fitted);
+      }
+      return { data: fitted.score(inp[0]) };
+    }
+  };
+  DM.cacheTrainedModel = fitted => restoredModels.set(fitted.recipe, fitted);
+
   function modelNode(def) {
     const params = [
       { key: 'target', label: 'Target (field to predict)', type: 'field' },
@@ -534,7 +575,19 @@
           'Trained on ' + train.length + (part ? ' Training-partition' : '') + ' records. Inputs: ' + inputs.map(U.esc).join(', ') + '.<br>' +
           'Adds field <code>' + U.esc(pf) + '</code> (prediction)' + (kind === 'categorical' ? ' and <code>' + U.esc(cf) + '</code> (confidence)' : '') + '.</p>' +
           (part ? '' : '<p class="warn">No Partition node upstream: the model was trained on all records, so there is no separate test set.</p>');
-        return { data: { fields, rows, meta }, model: { title: def.label + ': ' + target, html: head + m.summary() } };
+        const snapshot = { fields: t.fields, rows: train, meta: t.meta };
+        return trainedResult({ data: { fields, rows, meta }, model: { title: def.label + ': ' + target, html: head + m.summary() } }, def.algo, snapshot, Object.assign({}, p, { inputs, targetKind: kind }), inputs, data => {
+          let scoredFields = U.setField(data.fields, pf, U.field(t, target).type);
+          if (kind === 'categorical') scoredFields = U.setField(scoredFields, cf, 'number');
+          const scoredRows = data.rows.map(r => {
+            const res = m.predict(r), o = Object.assign({}, r, { [pf]: res.pred });
+            if (kind === 'categorical') o[cf] = +res.conf.toFixed(4);
+            return o;
+          });
+          const scoredMeta = U.copyMeta(data.meta);
+          scoredMeta.models = (scoredMeta.models || []).filter(x => x.pred !== pf).concat(meta.models.find(x => x.pred === pf));
+          return { fields: scoredFields, rows: scoredRows, meta: scoredMeta };
+        });
       }
     };
   }
@@ -611,7 +664,15 @@
         '.<br>Adds <code>$KM-K-Means</code> (cluster) and <code>$KMD-K-Means</code> (distance to cluster centre)' +
         (single ? ', <code>$KMI-K-Means</code> (anomaly index: distance relative to the average) and <code>$KMA-K-Means</code> (<i>anomaly</i> or <i>normal</i>)' : '') +
         (silValues ? ' and <code>$KMS-K-Means</code> (silhouette: +1 well inside its cluster, below 0 probably misplaced)' : '') + '.</p>';
-      return { data: table(t, fields, rows), model: { title: single ? 'K-Means (single cluster)' : 'K-Means (' + p.k + ' clusters)', html: head + m.summary() } };
+      return trainedResult({ data: table(t, fields, rows), model: { title: single ? 'K-Means (single cluster)' : 'K-Means (' + p.k + ' clusters)', html: head + m.summary() } }, 'kmeans', t, Object.assign({}, p, { inputs }), inputs, data => {
+        let fs = U.setField(U.setField(data.fields, '$KM-K-Means', 'string'), '$KMD-K-Means', 'number');
+        if (single) fs = U.setField(U.setField(fs, '$KMI-K-Means', 'number'), '$KMA-K-Means', 'string');
+        return table(data, fs, data.rows.map(r => {
+          const res = m.predict(r), o = Object.assign({}, r, { '$KM-K-Means': res.pred, '$KMD-K-Means': +res.conf.toFixed(4) });
+          if (single) { o['$KMI-K-Means'] = +res.index.toFixed(4); o['$KMA-K-Means'] = res.anomaly ? 'anomaly' : 'normal'; }
+          return o;
+        }));
+      });
     }
   };
 
@@ -643,7 +704,14 @@
       const head = '<p class="model-head"><b>Anomaly Detection</b> trained on ' + train.length + (part ? ' Training-partition' : '') + ' records. Inputs: ' + inputs.map(U.esc).join(', ') + '.<br>' +
         'Adds <code>$O-Anomaly</code> (<i>anomaly</i> or <i>normal</i>), <code>$OA-Anomaly</code> (anomaly index), <code>$OP-Anomaly</code> (peer group) and <code>$OR-Anomaly</code> (field contributing most, for anomalies).</p>' +
         (part ? '' : '<p class="warn">No Partition node upstream: the model was trained on all records.</p>');
-      return { data: table(t, fields, rows), model: { title: 'Anomaly Detection', html: head + m.summary() } };
+      return trainedResult({ data: table(t, fields, rows), model: { title: 'Anomaly Detection', html: head + m.summary() } }, 'anomaly', { fields: t.fields, rows: train, meta: t.meta }, Object.assign({}, p, { inputs }), inputs, data => {
+        let fs = data.fields;
+        ['$O-Anomaly:string', '$OA-Anomaly:number', '$OP-Anomaly:string', '$OR-Anomaly:string'].forEach(s => { const [name, ty] = s.split(':'); fs = U.setField(fs, name, ty); });
+        return table(data, fs, data.rows.map(r => {
+          const res = m.predict(r);
+          return Object.assign({}, r, { '$O-Anomaly': res.pred, '$OA-Anomaly': +res.conf.toFixed(4), '$OP-Anomaly': res.peer, '$OR-Anomaly': res.reason == null ? null : res.reason });
+        }));
+      });
     }
   };
 
@@ -702,7 +770,30 @@
       const fields = [['Antecedent', 'string'], ['Consequent', 'string'], ['Antecedent support', 'number'], ['Rule support', 'number'], ['Confidence', 'number'], ['Lift', 'number'], ['Transactions', 'number']]
         .map(f => ({ name: f[0], type: f[1] }));
       const rows = m.rules.map(r => ({ 'Antecedent': r.ante.join(' & '), 'Consequent': r.cons, 'Antecedent support': r.anteSup, 'Rule support': r.support, 'Confidence': r.conf, 'Lift': r.lift, 'Transactions': r.count }));
-      return { data: { fields, rows, meta: { kind: 'rules' } }, model: { title: (ctx.name || 'Apriori') + ': ' + m.rules.length + ' rules', html: head + m.summary() } };
+      const names = p.format === 'tabular' ? resolveInputs(t, p, null) : [p.idField, p.itemField];
+      return trainedResult({ data: { fields, rows, meta: { kind: 'rules' } }, model: { title: (ctx.name || 'Apriori') + ': ' + m.rules.length + ' rules', html: head + m.summary() } }, 'apriori', t, Object.assign({}, p, p.format === 'tabular' ? { inputs: names } : {}), names, data => {
+        const baskets = new Map();
+        if (p.format === 'tabular') data.rows.forEach((r, i) => {
+          baskets.set(i + 1, new Set(names.filter(n => !U.isMissing(r[n]) && (p.items === 'values' || TRUE_FLAG.test(String(r[n]).trim()))).map(n => p.items === 'values' ? n + ' = ' + r[n] : n)));
+        });
+        else data.rows.forEach(r => {
+          if (U.isMissing(r[p.idField]) || U.isMissing(r[p.itemField])) return;
+          const id = String(r[p.idField]);
+          if (!baskets.has(id)) baskets.set(id, new Set());
+          baskets.get(id).add(String(r[p.itemField]).trim());
+        });
+        const recommendations = [];
+        baskets.forEach((items, id) => {
+          const best = new Map();
+          m.rules.forEach(rule => {
+            if (items.has(rule.cons) || !rule.ante.every(item => items.has(item))) return;
+            const prev = best.get(rule.cons);
+            if (!prev || rule.conf > prev.conf || (rule.conf === prev.conf && rule.lift > prev.lift)) best.set(rule.cons, rule);
+          });
+          best.forEach(rule => recommendations.push({ Basket: String(id), Recommendation: rule.cons, Antecedent: rule.ante.join(' & '), Confidence: rule.conf, Lift: rule.lift }));
+        });
+        return { fields: [['Basket', 'string'], ['Recommendation', 'string'], ['Antecedent', 'string'], ['Confidence', 'number'], ['Lift', 'number']].map(([name, type]) => ({ name, type })), rows: recommendations, meta: {} };
+      });
     }
   };
 

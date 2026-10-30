@@ -90,6 +90,18 @@
     }
   }
 
+  function createTrainedNode(id) {
+    const source = node(id), model = S.models.get(id);
+    if (!source || !model || !model.fitted) { status('Run the modeling node first.', true); return; }
+    const fitted = model.fitted;
+    DM.cacheTrainedModel(fitted);
+    const n = addNode('trained_model', source.x + 150, source.y + 120, { recipe: fitted.recipe });
+    n.name = 'Trained: ' + model.title;
+    S.sel = { kind: 'node', id: n.id };
+    render();
+    status('Created a frozen trained model. Connect a NEW data source into it, then connect a Table or Analysis after it.');
+  }
+
   function runNodes(ids, showSingle) {
     if (!ids.length) { status('Nothing to run. Add an output node (Table, Analysis, …) at the end of a branch.', true); return; }
     status('Running…');
@@ -270,7 +282,10 @@
     const items = [['Edit…', () => openNodeDialog(n)]];
     if (hasOutput(n) && t.inputs !== undefined) items.push(['Preview data', () => preview(n)]);
     if (t.terminal || t.model) items.push(['Run', () => runNodes([n.id], true)]);
-    if (t.model && S.models.has(n.id)) items.push(['View model', () => showModel(n.id)]);
+    if (t.model && S.models.has(n.id)) {
+      items.push(['View model', () => showModel(n.id)]);
+      items.push(['Create trained model node', () => createTrainedNode(n.id)]);
+    }
     items.push(null, ['Duplicate', () => { const c = addNode(n.type, n.x + 30, n.y + 30, JSON.parse(JSON.stringify(n.params))); c.name = n.name; S.sel = { kind: 'node', id: c.id }; render(); }]);
     items.push(['Disconnect', () => { S.links = S.links.filter(l => l.from !== n.id && l.to !== n.id); render(); }]);
     items.push(['Delete', () => { deleteNode(n.id); render(); renderManager(); }]);
@@ -579,7 +594,7 @@
         '<span class="mgr-text"><b>' + U.esc(o.title) + '</b><small>' + timeStr(o.time) + '</small></span><button class="x" title="Remove">✕</button></div>';
     }).join('') : '<p class="muted pad">Outputs (tables, charts, evaluations) appear here after you run the stream.</p>';
     const ms = [...S.models.values()].filter(m => node(m.nodeId));
-    mList.innerHTML = ms.length ? ms.map(m => '<div class="mgr-item" data-id="' + m.nodeId + '"><span class="mini gem">◆</span><span class="mgr-text"><b>' + U.esc(m.title) + '</b><small>trained ' + timeStr(m.time) + '</small></span></div>').join('')
+    mList.innerHTML = ms.length ? ms.map(m => '<div class="mgr-item" data-id="' + m.nodeId + '"><span class="mini gem">◆</span><span class="mgr-text"><b>' + U.esc(m.title) + '</b><small>trained ' + timeStr(m.time) + '</small></span><button class="create-trained" title="Create a frozen trained model node">Create node</button></div>').join('')
       : '<p class="muted pad">Trained models appear here. Connect a modeling node (after a Partition) and press Run.</p>';
     $('#tab-models-count').textContent = ms.length ? ' (' + ms.length + ')' : '';
     $('#tab-outputs-count').textContent = S.outputs.length ? ' (' + S.outputs.length + ')' : '';
@@ -589,7 +604,11 @@
     if (e.target.classList.contains('x')) { S.outputs = S.outputs.filter(o => o.id !== it.dataset.id); renderManager(); return; }
     showOutput(S.outputs.find(o => o.id === it.dataset.id));
   });
-  $('#mgr-models').addEventListener('click', e => { const it = e.target.closest('.mgr-item'); if (it) showModel(it.dataset.id); });
+  $('#mgr-models').addEventListener('click', e => {
+    const it = e.target.closest('.mgr-item'); if (!it) return;
+    if (e.target.closest('.create-trained')) createTrainedNode(it.dataset.id);
+    else showModel(it.dataset.id);
+  });
   function switchTab(tab) {
     document.querySelectorAll('#manager .tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     $('#mgr-outputs').classList.toggle('hidden', tab !== 'outputs');
