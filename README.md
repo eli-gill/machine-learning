@@ -29,6 +29,41 @@ All data stays in the browser.
 - **Anomaly Detection** is a separate model that needs no target. It groups the Training records into peer groups with k-means, scores each record against its own group (`$OA-` anomaly index, `$OP-` peer group), flags unusual ones (`$O-`, by top % or by index cutoff) and names the field contributing most (`$OR-`).
 - Eight example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification (including CHAID), ANN explanation with a surrogate tree, SVM classification, house-price regression, K-Means clustering, Iris anomaly detection, and market-basket association rules.
 
+### Reuse a trained model on new data
+
+1. Run any modeling node as usual (right-click → **Run**, or run its stream).
+2. In the **Models** tab click **Create node**, or right-click the original modeling
+   node and choose **Create trained model node**.
+3. A separate **Trained Model** node appears on the canvas. Connect a **new Sample
+   Data or CSV / Excel File source into it**, then connect a Table, Analysis, Plot,
+   or Export after it. The training branch does not need to remain connected.
+4. Run the new branch. The trained node applies its frozen preprocessing, weights,
+   tree, neighbours, clusters, thresholds, or rules; it never learns from incoming data.
+
+This works for **every modeling node**, including ANN, SVM, CHAID, regression,
+KNN, Naive Bayes, both K-Means modes, Anomaly Detection, and Apriori. Incoming
+fields must have the original input names and types; extra fields are retained.
+Supervised targets are optional when scoring. If labels are present, Analysis can
+compare predictions with them. Apply the same upstream cleaning/derived fields to
+new data yourself: the trained node freezes the model, not the whole cleaning stream.
+K-Means scoring adds cluster/distance fields (and single-cluster anomaly fields),
+but not silhouette, which describes a fitted dataset rather than an individual new row.
+
+**Apriori** applies its retained rules instead of mining new ones. It outputs a
+recommendation table: Basket, Recommendation, Antecedent, Confidence, and Lift.
+Rules fire when all antecedent items occur and the consequent is absent. For each
+basket/consequent, the highest-confidence rule wins (ties use lift). Tabular Basket
+IDs are 1-based input row numbers; transactional Basket IDs come from the configured
+ID field. Baskets with no applicable recommendations produce no output rows.
+
+**Saving and privacy:** Save/Open and browser auto-save include a frozen training
+snapshot and settings in each trained node. On first use after reopening, the model
+is reconstructed **once from that snapshot**, then cached; new scoring data is never
+used to fit it. This is a portable training recipe, not a weights-only model format.
+Saved streams can therefore be larger and **contain training records**—do not share
+sensitive data inadvertently. Re-running or deleting the original trainer does not
+update its existing trained nodes. To use a newly fitted model, create another node.
+
 ### Support Vector Machine
 
 Choose **Examples… → Iris: support vector machine classification**, then **Run**.
