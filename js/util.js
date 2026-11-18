@@ -57,7 +57,8 @@ window.DM = window.DM || {};
 
   // Stream a File through a CSV parser without holding it in memory.
   // opts: { columns: [names] (empty = all), maxRows: keep at most N data rows (0 = all),
-  //         mode: 'first' | 'sample' (uniform random sample of maxRows), seed, onProgress(fraction, rowsSeen) }
+  //         mode: 'first' | 'sample' (uniform random sample of maxRows), seed,
+  //         maxBytes (retained UTF-8 CSV budget, default 250 MB), onProgress(fraction, rowsSeen) }
   // Resolves to { text (reduced CSV), total (data rows seen), kept, header }.
   U.streamCSV = async function (file, opts) {
     opts = opts || {};
@@ -67,7 +68,14 @@ window.DM = window.DM || {};
     const dec = new TextDecoder('utf-8');
     const reader = file.stream().getReader();
     let delim = null, header = null, idx = null, total = 0, done = false;
-    const kept = [];
+    const kept = [], sizes = [];
+    const encoder = new TextEncoder();
+    const maxBytes = opts.maxBytes > 0 ? opts.maxBytes : 250e6;
+    let outputBytes = 0, headerLine = '';
+    const csvLine = r => r.map(v => /[",\n\r]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v)).join(',');
+    const checkSize = () => {
+      if (outputBytes > maxBytes) throw new Error('The retained CSV exceeds ' + (maxBytes / 1e6) + ' MB. Keep fewer rows or columns.');
+    };
     let row = [], field = '', q = false, pendQuote = false, pendCR = false, first = true, bytes = 0, lastYield = 0;
     const endRow = () => {
       row.push(field); field = '';
@@ -81,13 +89,23 @@ window.DM = window.DM || {};
           const bad = want.filter((w, i) => idx[i] < 0);
           if (bad.length) throw new Error('Column not found: ' + bad.join(', '));
         }
+        headerLine = csvLine(idx ? idx.map(i => header[i]) : header);
+        outputBytes = encoder.encode(headerLine).length;
+        checkSize();
         return;
       }
       total++;
-      const out = idx ? idx.map(i => r[i] === undefined ? '' : r[i]) : r;
-      if (!maxRows || kept.length < maxRows) kept.push(out);
-      else if (sample) { const j = Math.floor(rand() * total); if (j < maxRows) kept[j] = out; }
-      else done = true;
+      let j = kept.length;
+      if (maxRows && j >= maxRows) {
+        if (!sample) { done = true; return; }
+        j = Math.floor(rand() * total);
+        if (j >= maxRows) return;
+      }
+      const out = csvLine(idx ? idx.map(i => r[i] === undefined ? '' : r[i]) : r);
+      const size = encoder.encode(out).length + 1;
+      outputBytes += size - (sizes[j] || 0);
+      checkSize();
+      kept[j] = out; sizes[j] = size;
     };
     const feed = text => {
       if (first) {
@@ -108,24 +126,23 @@ window.DM = window.DM || {};
         else field += c;
       }
     };
-    while (!done) {
-      const { value, done: eof } = await reader.read();
-      if (eof) { feed(dec.decode()); break; }
-      bytes += value.length;
-      feed(dec.decode(value, { stream: true }));
-      if (opts.onProgress && Date.now() - lastYield > 100) {
-        lastYield = Date.now();
-        opts.onProgress(bytes / (file.size || 1), total);
+    try {
+      while (!done) {
+        const { value, done: eof } = await reader.read();
+        if (eof) { feed(dec.decode()); break; }
+        bytes += value.length;
+        feed(dec.decode(value, { stream: true }));
+        if (opts.onProgress && Date.now() - lastYield > 100) {
+          lastYield = Date.now();
+          opts.onProgress(bytes / (file.size || 1), total);
+        }
       }
+      if (!done && (field !== '' || row.length)) { pendQuote = false; endRow(); }
+      if (!header) throw new Error('The CSV file is empty.');
+      return { text: [headerLine].concat(kept).join('\n'), total, kept: kept.length, header, truncated: done };
+    } finally {
+      try { await reader.cancel(); } finally { reader.releaseLock(); }
     }
-    if (done) reader.cancel();
-    if (!done && (field !== '' || row.length)) { pendQuote = false; endRow(); }
-    if (!header) throw new Error('The CSV file is empty.');
-    const q2 = v => { const s = String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const hdr = idx ? idx.map(i => header[i]) : header;
-    const lines = [hdr.map(q2).join(',')];
-    kept.forEach(r => lines.push(r.map(q2).join(',')));
-    return { text: lines.join('\n'), total, kept: kept.length, header, truncated: done };
   };
 
   const isNumStr = v => { const s = String(v).trim(); return s !== '' && isFinite(Number(s)); };
@@ -218,6 +235,10 @@ window.DM = window.DM || {};
 
   /* ---------- statistics ---------- */
   U.nums = (rows, name) => { const a = []; for (const r of rows) if (U.isNum(r[name])) a.push(r[name]); return a; };
+  // Iterate rather than spreading records into function arguments (browser limits
+  // are commonly reached at around 100k values).
+  U.min = a => { let v = Infinity; for (const x of a) v = Math.min(v, x); return v; };
+  U.max = a => { let v = -Infinity; for (const x of a) v = Math.max(v, x); return v; };
   U.mean = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN;
   U.std = a => {
     if (a.length < 2) return 0;
@@ -337,7 +358,7 @@ window.DM = window.DM || {};
     const m = { l: 56, r: 16 + legendW, t: 16, b: 70 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const totals = labels.map((_, i) => series.reduce((s, se) => s + (se.values[i] || 0), 0));
-    const maxV = Math.max(1, ...totals);
+    const maxV = Math.max(1, U.max(totals));
     const ticks = niceTicks(0, maxV, 5);
     const top = ticks[ticks.length - 1];
     const bw = pw / Math.max(1, labels.length);
@@ -381,7 +402,7 @@ window.DM = window.DM || {};
     const m = { l: 60, r: 16 + legendW, t: 16, b: 46 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const xs = points.map(p => p.x), ys = points.map(p => p.y);
-    const xt = niceTicks(Math.min(...xs), Math.max(...xs), 6), yt = niceTicks(Math.min(...ys), Math.max(...ys), 6);
+    const xt = niceTicks(U.min(xs), U.max(xs), 6), yt = niceTicks(U.min(ys), U.max(ys), 6);
     const x0 = xt[0], x1 = xt[xt.length - 1], y0 = yt[0], y1 = yt[yt.length - 1];
     const sx = v => m.l + ((v - x0) / (x1 - x0 || 1)) * pw, sy = v => m.t + ph - ((v - y0) / (y1 - y0 || 1)) * ph;
     let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img">';
@@ -403,7 +424,7 @@ window.DM = window.DM || {};
 
   // Tiny inline histogram for the Data Audit node.
   U.sparkBars = function (values) {
-    const W = 90, H = 26, max = Math.max(1, ...values), bw = W / Math.max(1, values.length);
+    const W = 90, H = 26, max = Math.max(1, U.max(values)), bw = W / Math.max(1, values.length);
     let s = '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">';
     values.forEach((v, i) => {
       const h = (v / max) * (H - 2);
@@ -414,7 +435,7 @@ window.DM = window.DM || {};
 
   // Equal-width histogram bins for a numeric array.
   U.histogram = function (vals, bins) {
-    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const lo = U.min(vals), hi = U.max(vals);
     const w = (hi - lo) / bins || 1;
     const counts = new Array(bins).fill(0);
     vals.forEach(v => { counts[Math.min(bins - 1, Math.floor((v - lo) / w))]++; });

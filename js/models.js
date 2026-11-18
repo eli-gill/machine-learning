@@ -342,7 +342,7 @@
       if (!col.num) return codes.length === 1 ? f + ' = "' + U.esc(col.names[codes[0]]) + '"' : f + ' in {' + codes.map(c => '"' + U.esc(col.names[c]) + '"').join(', ') + '}';
       const real = codes.filter(c => c !== col.miss), hasMiss = codes.length !== real.length;
       if (!real.length) return f + ' is missing';
-      const lo = Math.min(...real), hi = Math.max(...real);
+      const lo = U.min(real), hi = U.max(real);
       const lower = lo > 0 ? col.edges[lo - 1] : -Infinity, upper = hi < col.edges.length ? col.edges[hi] : Infinity;
       let t;
       if (lower === -Infinity && upper === Infinity) t = f + ' (any value)';
@@ -698,7 +698,7 @@
 
   // Equal-width histogram of distances (or anomaly indexes) as a small SVG, with a marker at the anomaly cutoff.
   function distanceChart(dists, cutoff, label) {
-    const hi = Math.max(...dists, cutoff), bins = 20, w = hi / bins || 1, counts = new Array(bins).fill(0);
+    const hi = Math.max(U.max(dists), cutoff), bins = 20, w = hi / bins || 1, counts = new Array(bins).fill(0);
     dists.forEach(d => { counts[Math.min(bins - 1, Math.floor(d / w))]++; });
     const mx = Math.max(1, ...counts), W = 460, H = 120, bw = W / bins;
     let s = '<svg viewBox="0 0 ' + W + ' ' + (H + 18) + '" width="' + W + '" height="' + (H + 18) + '" class="spark">';
@@ -797,7 +797,7 @@
           const flagged = trainDist.filter(d => d > cutoff).length, sd = U.std(trainDist);
           let h = '<p>Single-cluster mode: all records belong to one cluster, so each record\'s <b>distance from the cluster centre</b> measures how unusual it is.</p>';
           h += '<h3>Distance from the centre (training records)</h3>' + U.simpleTable(['Mean', 'Std dev', 'Maximum', 'Anomaly cutoff', 'Flagged'],
-            [[meanDist, sd, Math.max(...trainDist), cutoff, flagged + ' (' + U.pct(flagged / trainDist.length) + ')']]);
+            [[meanDist, sd, U.max(trainDist), cutoff, flagged + ' (' + U.pct(flagged / trainDist.length) + ')']]);
           h += distanceChart(trainDist, cutoff);
           h += '<p class="muted"><b>Anomaly index</b> = distance ÷ mean training distance (1 = typical). Records with a distance above the cutoff are flagged. Inputs are standardized, so each field counts equally.</p>';
           h += '<h3>Cluster centre</h3><p class="muted">Numbers: mean. Categories: most common value.</p>' +

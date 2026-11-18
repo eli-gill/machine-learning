@@ -229,7 +229,7 @@
     }
   };
 
-  const AGG = { Mean: v => U.mean(v), Sum: v => v.reduce((a, b) => a + b, 0), Min: v => Math.min(...v), Max: v => Math.max(...v), SDev: v => U.std(v) };
+  const AGG = { Mean: v => U.mean(v), Sum: v => v.reduce((a, b) => a + b, 0), Min: v => U.min(v), Max: v => U.max(v), SDev: v => U.std(v) };
   T.aggregate = {
     cat: 'record', label: 'Aggregate', glyph: 'Σ', inputs: 1,
     desc: 'Summarise records into groups (one output record per group).',
@@ -387,7 +387,7 @@
       if (!vals.length) throw new Error('No numeric values to bin.');
       let edges;
       if (p.method === 'freq') edges = Array.from({ length: k - 1 }, (_, i) => U.quantile(vals, (i + 1) / k));
-      else { const lo = Math.min(...vals), hi = Math.max(...vals); edges = Array.from({ length: k - 1 }, (_, i) => lo + (hi - lo) * (i + 1) / k); }
+      else { const lo = U.min(vals), hi = U.max(vals); edges = Array.from({ length: k - 1 }, (_, i) => lo + (hi - lo) * (i + 1) / k); }
       edges = edges.map(e => +e.toFixed(4)).filter((e, i, a) => a.indexOf(e) === i);
       const label = i => i === 0 ? '< ' + U.fmt(edges[0]) : i === edges.length ? '≥ ' + U.fmt(edges[edges.length - 1]) : U.fmt(edges[i - 1]) + ' – ' + U.fmt(edges[i]);
       const name = p.newName || f.name + '_BIN';
@@ -817,7 +817,7 @@
         const missCell = { html: miss ? '<span class="' + (miss / n > 0.05 ? 'bad' : 'warnc') + '">' + miss + ' (' + U.pct(miss / Math.max(1, n)) + ')</span>' : '0' };
         if (f.type === 'number') {
           const v = U.nums(t.rows, f.name);
-          return [f.name, { html: '<span class="ftype number">#</span>' }, { html: v.length > 1 ? U.sparkBars(U.histogram(v, 12).counts) : '' }, v.length ? Math.min(...v) : '', v.length ? Math.max(...v) : '',
+          return [f.name, { html: '<span class="ftype number">#</span>' }, { html: v.length > 1 ? U.sparkBars(U.histogram(v, 12).counts) : '' }, v.length ? U.min(v) : '', v.length ? U.max(v) : '',
             v.length ? U.mean(v) : '', v.length ? U.std(v) : '', uniq, n - miss, missCell];
         }
         const c = [...U.counts(t.rows, f.name).entries()].sort((a, b) => b[1] - a[1]);
