@@ -29,6 +29,14 @@ All data stays in the browser.
 - **Anomaly Detection** is a separate model that needs no target. It groups the Training records into peer groups with k-means, scores each record against its own group (`$OA-` anomaly index, `$OP-` peer group), flags unusual ones (`$O-`, by top % or by index cutoff) and names the field contributing most (`$OR-`).
 - Eight example streams are available under **Examples…**: customer churn (join → clean → partition → tree & logistic → analysis), Iris classification (including CHAID), ANN explanation with a surrogate tree, SVM classification, house-price regression, K-Means clustering, Iris anomaly detection, and market-basket association rules.
 
+### Large datasets
+
+- CSV / Excel uploads and retained streamed CSV results can be up to **250 MB** (previously 100 MB). Excel worksheets allow up to **10 million cells** and 250 MB of uncompressed XML per ZIP entry.
+- For larger CSV source files, use **Large CSV file (streamed, multi-GB)**. Choose columns and a row sample, or set rows to **0** to retain every row within the result budget. Streaming checks the retained UTF-8 size while reading and stops with guidance if it exceeds the budget.
+- Numeric summaries, Aggregate Min/Max, Binning, distributions, Data Audit, and clustering distance summaries avoid JavaScript's function-argument limits on 100k+ records. Regression tests exercise 200,000 records without silently sampling them.
+- All computation still runs in browser memory. File size is not a guarantee that every model will be fast: wide datasets, many categories, KNN scoring, and iterative training can remain expensive. Use Sample, Filter, or fewer training iterations when needed. Table and plot display limits do not limit model training rows.
+- Large embedded datasets may exceed browser auto-save storage. Use **Save** to download your stream explicitly; saved files include the data.
+
 ### Reuse a trained model on new data
 
 1. Run any modeling node as usual (right-click → **Run**, or run its stream).

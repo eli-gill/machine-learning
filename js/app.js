@@ -3,7 +3,7 @@
   'use strict';
   const U = DM.util, T = DM.nodeTypes;
   // Data is read into a JS string in the browser; V8 caps strings near 512 MB, so ~5 GB is not reachable.
-  const MAX_UPLOAD_BYTES = 100e6, MAX_UPLOAD_LABEL = '100 MB';
+  const MAX_UPLOAD_BYTES = 250e6, MAX_UPLOAD_LABEL = '250 MB';
   // Files above this are never loaded whole; the "Large CSV" section streams and reduces them instead.
   const $ = (sel, el) => (el || document).querySelector(sel);
   const STORE_KEY = 'dms-stream-v1';
@@ -527,7 +527,7 @@
               bigFile.disabled = true;
               try {
                 const res = await U.streamCSV(f, {
-                  maxRows: +bigRows.value || 0, mode: bigMode.value,
+                  maxRows: +bigRows.value || 0, mode: bigMode.value, maxBytes: MAX_UPLOAD_BYTES,
                   columns: bigCols.value.split(',').map(x => x.trim()).filter(Boolean),
                   onProgress: (fr, n) => { bigInfo.textContent = 'Reading ' + f.name + ': ' + Math.round(fr * 100) + '% (' + n.toLocaleString() + ' rows scanned)…'; }
                 });

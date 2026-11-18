@@ -8,7 +8,7 @@ window.DM = window.DM || {};
   'use strict';
   const U = DM.util;
   const X = {};
-  const MAX_XML = 80e6;   // refuse sheets that unpack to more than ~80 MB of XML
+  const MAX_XML = 250e6;   // bound decompressed XML memory while allowing larger worksheets
 
   /* ---------- zip reading ---------- */
   async function inflate(data) {
@@ -144,7 +144,7 @@ window.DM = window.DM || {};
     if (!cells.length) return [];
     let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1;
     cells.forEach(([a, b]) => { r0 = Math.min(r0, a); r1 = Math.max(r1, a); c0 = Math.min(c0, b); c1 = Math.max(c1, b); });
-    if ((r1 - r0 + 1) * (c1 - c0 + 1) > 4e6) throw new Error('This sheet is too large to open in the browser. Please use a smaller sample.');
+    if ((r1 - r0 + 1) * (c1 - c0 + 1) > 10e6) throw new Error('This sheet is too large to open in the browser. Please use a smaller sample.');
     const grid = Array.from({ length: r1 - r0 + 1 }, () => new Array(c1 - c0 + 1).fill(''));
     cells.forEach(([a, b, val]) => { grid[a - r0][b - c0] = String(val); });
     return grid;
